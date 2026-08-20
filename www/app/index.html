@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://api.mainnet-beta.solana.com; img-src 'self' data:; style-src 'self' 'unsafe-inline';">
+  <title>OpenZoo</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div id="app" data-component="openzoo-app">
+    <header class="top">
+      <div class="brand">
+        <h1>OPENZOO</h1>
+        <span>PSG1</span>
+      </div>
+      <div class="wallet">
+        <span id="wallet-label" data-component="wallet-label">not connected</span>
+        <span class="exit" id="exit" data-testid="exit-button">EXIT</span>
+      </div>
+    </header>
+
+    <div id="rail" class="rail" data-component="rail-status"></div>
+
+    <nav class="tabs" data-component="tabs">
+      <button class="tab active" id="tab-chat" data-testid="tab-chat">CHAT</button>
+      <button class="tab" id="tab-bind" data-testid="tab-bind">BIND</button>
+      <button class="tab" id="tab-stats" data-testid="tab-stats">STATS</button>
+    </nav>
+
+    <section class="panel active" id="panel-chat" data-component="chat-panel">
+      <div id="chat-log" data-component="chat-log"></div>
+      <div class="composer">
+        <select id="model" data-testid="model-select" aria-label="Model"></select>
+        <textarea id="prompt" data-testid="chat-input" rows="2" placeholder="Message OpenZoo…"></textarea>
+        <button class="act" id="send" data-testid="chat-send">SEND</button>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-bind" data-component="bind-panel">
+      <div class="stack">
+        <p class="help">
+          POST <code>/v1/hrr/bind</code> with a corpus. The gateway returns a
+          <code>context_id</code> (<code>ctx_…</code>). Later chats send it as
+          <code>x-hrr-context</code>. This is not RUN / WRITE / READ / SERVE.
+        </p>
+        <label class="lbl" for="corpus">Corpus</label>
+        <textarea class="field" id="corpus" data-testid="bind-corpus" placeholder="Text to bind into holographic context…"></textarea>
+        <label class="lbl" for="context-id">context_id</label>
+        <input class="field" id="context-id" data-testid="bind-context-id" type="text" placeholder="ctx_… from bind, or paste one">
+        <div class="row">
+          <button class="act" id="bind-go" data-testid="bind-submit">BIND</button>
+          <button class="act ghost" id="bind-attach" data-testid="bind-attach">ATTACH</button>
+        </div>
+        <div class="mono" id="bind-result" data-component="bind-result"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-stats" data-component="stats-panel">
+      <div class="stack" id="stats-box"></div>
+    </section>
+  </div>
+
+  <script src="pay.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
