@@ -1,4 +1,4 @@
-/* First-X-back race — same policy as grokui, no SPAWN / worktrees / podagent.
+/* First-X-back race — same policy as grokui, phone-local chat only.
    Launch Y from the selected band. First X countable answers are judged by a
    cheap classifier. Empty / HTTP / pay / fetch-failed do not count. All-fail
    never ships one model's fetch-failed as the winner. Do not wait on the slowest. */

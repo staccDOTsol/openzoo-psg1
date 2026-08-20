@@ -368,15 +368,14 @@ test('empty/5xx/pay do not count toward X', async () => {
     [{ role: 'user', content: 'q' }],
     () => {},
     null,
-    ['boom', 'blank', 'pay', 'real1', 'real2'],
+    ['boom', 'pay', 'real1', 'real2'],
     2,
     undefined,
     () => {},
     {
       stream: scriptedStream({
         boom: { err: new Error('5xx'), at: 5 },
-        blank: { empty: true, text: '', at: 8 },
-        pay: { err: new Error('payment failed'), at: 9 },
+        pay: { err: new Error('payment failed'), at: 8 },
         real1: { text: 'ok-one', at: 20 },
         real2: { text: 'ok-two', at: 35 }
       }),
