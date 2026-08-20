@@ -79,11 +79,14 @@ function setStatus(msg, kind) {
   el.textContent = msg;
 }
 
-function toast(text) {
-  var el = $('copiedToast');
-  el.textContent = text || 'copied';
-  el.classList.add('show');
-  setTimeout(function () { el.classList.remove('show'); }, 1200);
+function toast(text, rect) {
+  if (window.OpenZooCopy) OpenZooCopy.showCopiedToast(rect, text || 'copied');
+  else {
+    var el = $('copiedToast');
+    el.textContent = text || 'copied';
+    el.classList.add('show');
+    setTimeout(function () { el.classList.remove('show'); }, 1200);
+  }
 }
 
 function initials(name) {
@@ -438,9 +441,18 @@ async function openWallet() {
     body.innerHTML = '<div class="wnote">Connect Jupiter Wallet from the start screen.</div>';
     return;
   }
-  html += '<div class="wrow"><div class="wlab">Solana</div><div class="waddr"></div></div>';
-  body.innerHTML = html;
-  body.querySelector('.waddr').textContent = wallet.address;
+  body.innerHTML = '';
+  if (window.OpenZooCopy && OpenZooCopy.walletRow) {
+    body.appendChild(OpenZooCopy.walletRow('Solana', wallet.address));
+  } else {
+    html += '<div class="wrow"><div class="wlab">Solana</div><div class="waddr"></div></div>';
+    body.innerHTML = html;
+    var addrEl = body.querySelector('.waddr');
+    addrEl.textContent = wallet.address;
+    addrEl.addEventListener('click', function () {
+      if (window.OpenZooCopy) OpenZooCopy.copyAddress(wallet.address, addrEl.getBoundingClientRect(), addrEl);
+    });
+  }
   try {
     var got = await OpenZooPay.fetchBalances(wallet.address);
     var b = got.balances || {};
@@ -457,7 +469,7 @@ async function openWallet() {
     body.appendChild(box);
     var note = document.createElement('div');
     note.className = 'wnote';
-    note.textContent = 'USDC, TOKEN, or LEOS here is enough. The app tops up before a paid call when it needs to.';
+    note.textContent = 'USDC, TOKEN, or LEOS here is enough. The app tops up before a paid call when it needs to. This is Jupiter Wallet on this handheld — not a local burner, not openzoo’s wallet.';
     body.appendChild(note);
   } catch (_) {
     var fail = document.createElement('div');
@@ -490,6 +502,12 @@ window.addEventListener('message', function (event) {
     wallet.address = null;
     wallet.method = null;
     renderHud();
+  }
+  if (data.type === 'app-pause' && window.OpenZooPay) {
+    OpenZooPay.notifyPause();
+  }
+  if (data.type === 'app-resume' && window.OpenZooPay) {
+    OpenZooPay.onAppResume(busy ? { onStatus: setStatus } : Object.assign(payHooks(), { autoRetry: true, onStatus: setStatus }));
   }
 });
 window.parent.postMessage({ type: 'wallet-request-info' }, '*');
@@ -572,6 +590,17 @@ $('textAttachCancel').onclick = function () {
 };
 $('textAttachOverlay').addEventListener('click', function (e) {
   if (e.target === $('textAttachOverlay')) $('textAttachOverlay').classList.remove('show');
+});
+
+if (window.OpenZooCopy && OpenZooCopy.bindSelectToCopy) OpenZooCopy.bindSelectToCopy(document);
+
+document.addEventListener('visibilitychange', function () {
+  if (!window.OpenZooPay) return;
+  if (document.hidden) OpenZooPay.notifyPause();
+  else OpenZooPay.notifyResume();
+});
+window.addEventListener('pageshow', function () {
+  if (window.OpenZooPay) OpenZooPay.notifyResume();
 });
 
 render();

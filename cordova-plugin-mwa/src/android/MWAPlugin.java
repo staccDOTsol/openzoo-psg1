@@ -55,7 +55,30 @@ public class MWAPlugin extends CordovaPlugin {
             cordova.getThreadPool().execute(() -> doSignAndSendTransaction(txB64, callbackContext));
             return true;
         }
+        // Real system clipboard. navigator.clipboard is missing or no-ops in
+        // the Cordova WebView (file://, not a secure context).
+        if ("copyText".equals(action)) {
+            final String text = args.optString(0, "");
+            cordova.getActivity().runOnUiThread(() -> doCopyText(text, callbackContext));
+            return true;
+        }
         return false;
+    }
+
+    private void doCopyText(String text, CallbackContext cb) {
+        try {
+            android.content.ClipboardManager clipboard =
+                (android.content.ClipboardManager) cordova.getActivity()
+                    .getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+            if (clipboard == null) {
+                cb.error("Clipboard unavailable");
+                return;
+            }
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("openzoo", text == null ? "" : text));
+            cb.success();
+        } catch (Exception e) {
+            cb.error(e.getMessage() != null ? e.getMessage() : "Clipboard copy failed");
+        }
     }
 
     /**

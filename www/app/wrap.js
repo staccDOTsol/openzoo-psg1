@@ -174,16 +174,39 @@ var OpenZooWrap = (function (OpenZooCodec) {
     };
   }
 
+  function looksDropped(err) {
+    var msg = (err && err.message) ? String(err.message) : String(err || '');
+    var low = msg.toLowerCase();
+    var name = err && err.name ? String(err.name).toLowerCase() : '';
+    return name === 'typeerror' || name === 'networkerror' ||
+      low.indexOf('load failed') >= 0 || low.indexOf('failed to fetch') >= 0 ||
+      low.indexOf('networkerror') >= 0 || low.indexOf('typeerror') >= 0;
+  }
+
   async function rpc(method, params, rpcUrl) {
-    var res = await fetch(rpcUrl || RPC_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params })
-    });
-    if (!res.ok) throw new Error('RPC HTTP ' + res.status);
-    var body = await res.json();
-    if (body.error) throw new Error(body.error.message || 'RPC error');
-    return body.result;
+    var last = null;
+    var attempt;
+    for (attempt = 0; attempt < 4; attempt++) {
+      try {
+        var res = await fetch(rpcUrl || RPC_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params })
+        });
+        if (!res.ok) throw new Error('RPC HTTP ' + res.status);
+        var body = await res.json();
+        if (body.error) throw new Error(body.error.message || 'RPC error');
+        return body.result;
+      } catch (e) {
+        last = e;
+        if (!looksDropped(e) || attempt === 3) break;
+        await new Promise(function (resolve) { setTimeout(resolve, 400 * (attempt + 1)); });
+      }
+    }
+    if (looksDropped(last)) {
+      throw new Error('Connection dropped while talking to the zoo. Return to OpenZoo and we will retry — approve in Jupiter Wallet if it is still open.');
+    }
+    throw last;
   }
 
   async function poolState(pool, rpcUrl) {

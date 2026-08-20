@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://api.mainnet-beta.solana.com; img-src 'self' data:; style-src 'self' 'unsafe-inline';">
+  <!-- connect-src: gateway (x402-tokens) + /supported (accrue) + the Solana RPC wrap/pay actually call. No :8402. -->
   <title>openzoo</title>
   <link rel="stylesheet" href="app.css">
 </head>
@@ -25,7 +26,7 @@
   <div id="walletOverlay" data-component="wallet-modal">
     <div id="walletBox">
       <h3>Your wallet</h3>
-      <div class="wsub">Jupiter Wallet on this Play Solana handheld. You pay per call from this address. The app tops up in the background when it can.</div>
+      <div class="wsub">Jupiter Wallet on this Play Solana handheld — not a local burner, not openzoo’s wallet. You pay per call from this address. Tap the address to copy it. The app tops up in the background when it can.</div>
       <div id="walletBody">loading…</div>
       <button class="dial" id="walletClose" type="button">close</button>
     </div>
@@ -101,6 +102,7 @@
   <script src="codec.js"></script>
   <script src="wrap.js"></script>
   <script src="pay.js"></script>
+  <script src="copy.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
