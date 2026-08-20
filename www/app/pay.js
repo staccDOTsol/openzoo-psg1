@@ -751,6 +751,28 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
     return out;
   }
 
+  function chatMessagesLength(path, body) {
+    if (!path || String(path).indexOf('/chat/completions') < 0 || body == null) return -1;
+    try {
+      var parsed = typeof body === 'string' ? JSON.parse(body) : body;
+      return Array.isArray(parsed && parsed.messages) ? parsed.messages.length : -1;
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  function stripContextIfFullThread(headers, path, body) {
+    var n = chatMessagesLength(path, body);
+    if (n <= 3) return headers;
+    if (headers['x-hrr-context'] || headers['X-HRR-Context']) {
+      var next = mergeHeaders(headers, {});
+      delete next['x-hrr-context'];
+      delete next['X-HRR-Context'];
+      return next;
+    }
+    return headers;
+  }
+
   async function paidFetch(path, init, hooks) {
     hooks = hooks || {};
     init = init || {};
@@ -758,7 +780,9 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer openzoo-psg1'
     }, init.headers);
-    if (hooks.contextId) headers['x-hrr-context'] = hooks.contextId;
+    var msgCount = chatMessagesLength(path, init.body);
+    if (hooks.contextId && msgCount <= 3) headers['x-hrr-context'] = hooks.contextId;
+    headers = stripContextIfFullThread(headers, path, init.body);
     if (hooks.namespace) headers['x-openzoo-namespace'] = hooks.namespace;
 
     var requestInit = {
@@ -827,7 +851,9 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer openzoo-psg1'
     }, pending.headers || {});
-    if (settleHooks.contextId) headers['x-hrr-context'] = settleHooks.contextId;
+    var pendingMsgCount = chatMessagesLength(pending.path, pending.body);
+    if (settleHooks.contextId && pendingMsgCount <= 3) headers['x-hrr-context'] = settleHooks.contextId;
+    headers = stripContextIfFullThread(headers, pending.path, pending.body);
     if (settleHooks.namespace) headers['x-openzoo-namespace'] = settleHooks.namespace;
     headers['X-PAYMENT'] = paid.header;
     var requestInit = { method: pending.method || 'POST', headers: headers };
@@ -947,6 +973,7 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
     pickWrappableRail: pickWrappableRail,
     pickLargestUseful: pickLargestUseful,
     paidFetch: paidFetch,
+    stripContextIfFullThread: stripContextIfFullThread,
     settle402: settle402,
     buildPayment: buildPayment,
     readSseOrJson: readSseOrJson,

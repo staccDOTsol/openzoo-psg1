@@ -37,7 +37,7 @@ function newThread(name) {
     boundHistoryCount: 0,
     attached: 0,
     spent: 0,
-    saved: 0,
+    direct: 0,
     calls: 0,
     model: ''
   };
@@ -143,15 +143,21 @@ function promptFunds(info) {
   });
 }
 
-function payHooks() {
+function payHooks(opts) {
+  opts = opts || {};
   var t = active();
-  return {
+  var hooks = {
     payer: wallet.address,
-    contextId: t.memory || undefined,
     onStatus: setStatus,
     confirmWrap: promptWrap,
     needFunds: promptFunds
   };
+  if (Object.prototype.hasOwnProperty.call(opts, 'contextId')) {
+    if (opts.contextId) hooks.contextId = opts.contextId;
+  } else if (t.memory) {
+    hooks.contextId = t.memory;
+  }
+  return hooks;
 }
 
 function setStatus(msg, kind) {
@@ -244,19 +250,24 @@ function renderHeader() {
 }
 
 function sessionTotals() {
-  var spent = 0, saved = 0, calls = 0;
+  var spent = 0, direct = 0, calls = 0;
   threads.forEach(function (t) {
     spent += Number(t.spent || 0);
-    saved += Number(t.saved || 0);
+    direct += Number(t.direct || 0);
     calls += Number(t.calls || 0);
   });
-  return { spent: spent, saved: saved, calls: calls };
+  return {
+    spent: spent,
+    direct: direct,
+    calls: calls,
+    savingX: OpenZooSpill.hudSavingX(direct, spent)
+  };
 }
 
 function renderHud() {
   var s = sessionTotals();
   $('hYouSpent').textContent = '$' + s.spent.toFixed(4);
-  $('hYouSaved').textContent = s.saved > 0 ? ('~$' + s.saved.toFixed(4)) : '—';
+  $('hYouSaved').textContent = s.savingX != null ? (s.savingX.toFixed(2) + '×') : '—';
   $('hCalls').textContent = String(s.calls);
   $('hFoot').textContent = wallet.address
     ? (wallet.address.slice(0, 4) + '…' + wallet.address.slice(-4) + ' · Jupiter Wallet')
@@ -411,20 +422,21 @@ async function remember(corpus, status) {
 }
 
 async function rememberHistory(t) {
-  var from = t.boundHistoryCount || 0;
-  var delta = t.messages.slice(from);
-  if (!delta.length) return;
-  var corpus = delta.map(function (h) {
-    return (h.role === 'user' ? 'you' : t.name) + ': ' + h.content;
-  }).join('\n');
+  var range = OpenZooSpill.prefixRange(t.messages.length, t.boundHistoryCount);
+  if (range.to <= range.from) return t.memory;
+  var delta = t.messages.slice(range.from, range.to);
+  var corpus = OpenZooSpill.formatHistory(delta, t.name);
   try {
     var ctx = await OpenZooPay.silentBind(corpus, payHooks(), t.memory);
     if (ctx) {
       t.memory = ctx;
-      t.boundHistoryCount = t.messages.length;
+      t.boundHistoryCount = range.to;
       persist();
     }
-  } catch (_) {}
+    return ctx || t.memory;
+  } catch (_) {
+    return t.memory;
+  }
 }
 
 async function send() {
@@ -460,17 +472,19 @@ async function send() {
   var thinking = bubble('…', false, true);
 
   try {
+    await rememberHistory(t);
+    var plan = OpenZooSpill.outgoingChat(t.messages, t.memory);
     var headers = { 'Content-Type': 'application/json' };
-    if (t.memory) headers['x-hrr-context'] = t.memory;
+    if (plan.contextId) headers['x-hrr-context'] = plan.contextId;
     var res = await OpenZooPay.paidFetch('/v1/chat/completions', {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
         model: t.model,
-        messages: t.messages,
+        messages: plan.messages,
         max_tokens: maxTokens(t.model)
       })
-    }, payHooks());
+    }, payHooks({ contextId: plan.contextId }));
     var d = await res.json().catch(function () { return {}; });
     if (res.status === 402) throw new Error('Still waiting on payment. Approve in Jupiter Wallet and retry.');
     if (!res.ok) throw new Error((d.error && d.error.message) || d.error || ('HTTP ' + res.status));
@@ -485,9 +499,7 @@ async function send() {
     thinking.parentElement.classList.remove('pending');
     t.messages.push({ role: 'assistant', content: content });
     var x = d.x402 || {};
-    t.calls += 1;
-    if (typeof x.billedUsd === 'number') t.spent += x.billedUsd;
-    if (typeof x.savesVsDirect === 'number' && x.savesVsDirect > 0) t.saved += x.savesVsDirect;
+    OpenZooSpill.applyReceipt(t, x);
     var bits = [];
     if (typeof x.billedUsd === 'number') bits.push('$' + x.billedUsd.toFixed(4));
     if (x.lecore && x.lecore.engaged) bits.push((x.lecore.recalled != null ? x.lecore.recalled : '?') + ' slices');
