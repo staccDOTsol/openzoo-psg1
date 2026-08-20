@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <widget id="fun.openzoo.psg1" version="1.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
     <name>OpenZoo</name>
-    <description>OpenZoo for Play Solana PSG1 — chat, bind, and stats paid from Jupiter Wallet via Mobile Wallet Adapter and x402. The handheld talks directly to the gateway; no localhost proxy.</description>
+    <description>OpenZoo for Play Solana PSG1 — grokui threads, chat, and wallet paid from Jupiter Wallet via Mobile Wallet Adapter and x402. The handheld talks directly to the gateway; no localhost proxy.</description>
     <author href="https://playsolana.com">
         OpenZoo
     </author>
@@ -11,6 +11,7 @@
 
     <!-- Bundled app + live x402 gateway (CORS is live; do not bounce :8402) -->
     <access origin="https://x402-tokens.fly.dev" />
+    <access origin="https://x402.accrue.fund" />
     <access origin="https://api.mainnet-beta.solana.com" />
     <allow-navigation href="https://x402-tokens.fly.dev/*" />
 

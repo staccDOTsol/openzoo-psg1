@@ -1,85 +1,232 @@
 'use strict';
 
 var $ = function (id) { return document.getElementById(id); };
-var SKEY = 'openzoo.psg1.session.v1';
-var GATEWAY = 'https://x402-tokens.fly.dev';
+var SKEY = 'openzoo.psg1.grokui.v1';
+var COLORS = ['#5b8def', '#f28c4d', '#b8f240', '#e05cf6', '#34c759', '#ff6b6b', '#64d2ff', '#ffd60a'];
 
-var persisted = {};
-try { persisted = JSON.parse(localStorage.getItem(SKEY) || '{}'); } catch (_) {}
+function loadStore() {
+  try { return JSON.parse(localStorage.getItem(SKEY) || '{}'); }
+  catch (_) { return {}; }
+}
 
-var state = {
-  messages: persisted.messages || [],
-  ctx: persisted.ctx || null,
-  spent: persisted.spent || 0,
-  saved: persisted.saved || 0,
-  calls: persisted.calls || 0,
-  model: persisted.model || '',
-  busy: false
-};
+function uid() {
+  return 't-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
 
+var persisted = loadStore();
+var threads = Array.isArray(persisted.threads) && persisted.threads.length
+  ? persisted.threads
+  : [newThread('openzoo')];
+var activeId = persisted.activeId && threads.some(function (t) { return t.id === persisted.activeId; })
+  ? persisted.activeId
+  : threads[0].id;
 var wallet = { address: null, method: null };
-var preferredAsset = '';
+var pendingFiles = [];
+var busy = false;
+var sidebarOpen = false;
+
+function newThread(name) {
+  return {
+    id: uid(),
+    name: name || 'new',
+    color: COLORS[Math.floor(Math.random() * COLORS.length)],
+    createdAt: Date.now(),
+    lastActivityAt: Date.now(),
+    messages: [],
+    memory: null,
+    boundHistoryCount: 0,
+    attached: 0,
+    spent: 0,
+    saved: 0,
+    calls: 0,
+    model: ''
+  };
+}
+
+function active() {
+  var i;
+  for (i = 0; i < threads.length; i++) if (threads[i].id === activeId) return threads[i];
+  return threads[0];
+}
 
 function persist() {
   try {
     localStorage.setItem(SKEY, JSON.stringify({
-      messages: state.messages,
-      ctx: state.ctx,
-      spent: state.spent,
-      saved: state.saved,
-      calls: state.calls,
-      model: $('model').value || ''
+      threads: threads,
+      activeId: activeId
     }));
   } catch (_) {}
 }
 
 function payHooks() {
+  var t = active();
   return {
     payer: wallet.address,
-    contextId: state.ctx || undefined,
-    preferredAsset: preferredAsset || undefined,
-    onStatus: function (msg) { setRailChip('', msg); },
-    onRail: function (pick) {
-      setRailChip('on', 'paying ' + OpenZooPay.railSymbol(pick.chosen));
-    }
+    contextId: t.memory || undefined,
+    onStatus: setStatus
   };
 }
 
-function setRailChip(kind, text) {
-  var el = $('railChip');
-  el.hidden = !text;
-  el.className = 'chip' + (kind ? ' ' + kind : '');
-  el.textContent = text || '';
-}
-
-function showUnpayable(err) {
-  var box = $('railWarn');
-  var rails = (err && err.rails) || [];
-  box.hidden = false;
-  box.innerHTML =
-    '<strong>Need yUSDCx or wTOKENx</strong> — Solana rails settle in NAV-wrapped Token-2022 twins, not plain USDC. Fund a twin in Jupiter Wallet, then retry.' +
-    (rails.length ? '<div class="rails-list">' + rails.map(function (r) {
-      return '<button class="rail-pick" data-asset="' + r.asset + '">' +
-        OpenZooPay.describeRail(r) + '</button>';
-    }).join('') + '</div>' : '');
-  box.querySelectorAll('.rail-pick').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      preferredAsset = btn.getAttribute('data-asset');
-      box.hidden = true;
-      setRailChip('', 'will try selected rail next (not wrap-on-device)');
-    });
-  });
-  setRailChip('warn', 'need yUSDCx or wTOKENx');
-}
-
-function handlePayError(err) {
-  if (err && err.code === 'UNPAYABLE') {
-    showUnpayable(err);
-    return err.message;
+function setStatus(msg, kind) {
+  var el = $('statusChip');
+  if (!msg) {
+    el.hidden = true;
+    el.textContent = '';
+    return;
   }
-  var msg = OpenZooPay.humanizePayError(err);
-  setRailChip('bad', msg);
-  return msg;
+  el.hidden = false;
+  el.className = 'status-chip' + (kind ? ' ' + kind : '');
+  el.textContent = msg;
+}
+
+function toast(text) {
+  var el = $('copiedToast');
+  el.textContent = text || 'copied';
+  el.classList.add('show');
+  setTimeout(function () { el.classList.remove('show'); }, 1200);
+}
+
+function initials(name) {
+  var parts = String(name || 'oz').trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+function previewOf(t) {
+  var last = t.messages[t.messages.length - 1];
+  return last ? String(last.content || '').replace(/\s+/g, ' ').slice(0, 72) : 'new thread';
+}
+
+function renderThreads() {
+  var q = ($('search').value || '').toLowerCase();
+  var box = $('threads');
+  box.innerHTML = '';
+  var list = threads.slice().sort(function (a, b) { return (b.lastActivityAt || 0) - (a.lastActivityAt || 0); });
+  var shown = 0;
+  list.forEach(function (t) {
+    if (q && (t.name || '').toLowerCase().indexOf(q) < 0 && previewOf(t).toLowerCase().indexOf(q) < 0) return;
+    shown++;
+    var row = document.createElement('div');
+    row.className = 'trow' + (t.id === activeId ? ' active' : '');
+    row.innerHTML =
+      '<div class="tavatar" style="background:' + t.color + '">' + initials(t.name) + '</div>' +
+      '<div class="tmeta"><div class="tname"></div><div class="tprev"></div></div>' +
+      '<button class="tclose" type="button" title="Close">✕</button>';
+    row.querySelector('.tname').textContent = t.name;
+    row.querySelector('.tprev').textContent = previewOf(t);
+    row.addEventListener('click', function (e) {
+      if (e.target.closest('.tclose')) return;
+      activeId = t.id;
+      persist();
+      render();
+      closeSidebar();
+    });
+    row.querySelector('.tclose').addEventListener('click', function (e) {
+      e.stopPropagation();
+      threads = threads.filter(function (x) { return x.id !== t.id; });
+      if (!threads.length) threads = [newThread('openzoo')];
+      if (activeId === t.id) activeId = threads[0].id;
+      persist();
+      render();
+    });
+    box.appendChild(row);
+  });
+  if (!shown) {
+    var empty = document.createElement('div');
+    empty.className = 'tempty';
+    empty.textContent = q ? 'No matching threads.' : 'No threads yet.';
+    box.appendChild(empty);
+  }
+}
+
+function renderHeader() {
+  var t = active();
+  var id = $('chatHeaderId');
+  id.innerHTML =
+    '<div class="tavatar" style="width:26px;height:26px;border-radius:7px;font-size:11px;background:' +
+    t.color + '">' + initials(t.name) + '</div>' +
+    '<div class="hname"><div></div>' +
+    (t.attached ? '<div class="hattached">files attached</div>' : '') +
+    '</div>';
+  id.querySelector('.hname > div').textContent = t.name;
+  if (t.model && !$('model').value) $('model').value = t.model;
+  else if (t.model) $('model').value = t.model;
+}
+
+function sessionTotals() {
+  var spent = 0, saved = 0, calls = 0;
+  threads.forEach(function (t) {
+    spent += Number(t.spent || 0);
+    saved += Number(t.saved || 0);
+    calls += Number(t.calls || 0);
+  });
+  return { spent: spent, saved: saved, calls: calls };
+}
+
+function renderHud() {
+  var s = sessionTotals();
+  $('hYouSpent').textContent = '$' + s.spent.toFixed(4);
+  $('hYouSaved').textContent = s.saved > 0 ? ('~$' + s.saved.toFixed(4)) : '—';
+  $('hCalls').textContent = String(s.calls);
+  $('hFoot').textContent = wallet.address
+    ? (wallet.address.slice(0, 4) + '…' + wallet.address.slice(-4) + ' · Jupiter Wallet')
+    : 'Connect Jupiter Wallet to pay from this handheld.';
+}
+
+function bubble(text, mine, pending) {
+  var row = document.createElement('div');
+  row.className = 'row ' + (mine ? 'user' : 'bot') + (pending ? ' pending' : '');
+  var b = document.createElement('div');
+  b.className = 'bubble';
+  b.textContent = text;
+  row.appendChild(b);
+  $('log').appendChild(row);
+  $('log').scrollTop = $('log').scrollHeight;
+  return b;
+}
+
+function renderLog() {
+  var t = active();
+  var log = $('log');
+  log.innerHTML = '';
+  if (!t.messages.length) {
+    var w = document.createElement('div');
+    w.className = 'welcome';
+    w.textContent = 'openzoo on Play Solana. Start a thread, attach files or notes if you want the zoo to remember them, and message. Payment comes from Jupiter Wallet — the app tops up in the background when it can.';
+    log.appendChild(w);
+    return;
+  }
+  t.messages.forEach(function (m) { bubble(m.content, m.role === 'user'); });
+}
+
+function renderAttachChips() {
+  var box = $('attachChips');
+  box.innerHTML = '';
+  pendingFiles.forEach(function (f, i) {
+    var chip = document.createElement('span');
+    chip.className = 'achip';
+    chip.innerHTML = '<span></span><span class="ax">✕</span>';
+    chip.querySelector('span').textContent = f.name;
+    chip.querySelector('.ax').addEventListener('click', function () {
+      pendingFiles.splice(i, 1);
+      renderAttachChips();
+      syncSend();
+    });
+    box.appendChild(chip);
+  });
+}
+
+function render() {
+  renderThreads();
+  renderHeader();
+  renderLog();
+  renderHud();
+  renderAttachChips();
+  syncSend();
+}
+
+function syncSend() {
+  $('send').classList.toggle('show', !!$('inp').value.trim() || pendingFiles.length > 0);
 }
 
 function maxTokens(model) {
@@ -92,7 +239,7 @@ function keepModel(id) {
 
 async function loadModels() {
   try {
-    var r = await fetch(GATEWAY + '/v1/models');
+    var r = await fetch(OpenZooPay.GATEWAY + '/v1/models');
     if (r.status === 402) {
       r = await OpenZooPay.paidFetch('/v1/models', { method: 'GET', body: null }, payHooks());
     }
@@ -106,224 +253,228 @@ async function loadModels() {
       o.value = m.id;
       dl.appendChild(o);
     });
-    if (!$('model').value) {
+    var t = active();
+    if (!t.model) {
       var pick = models.filter(function (m) { return m.id.indexOf('gpt-4o-mini') >= 0; })[0]
         || models.filter(function (m) { return m.id.indexOf('gemini-2.5-flash') >= 0; })[0]
         || models[0];
-      if (pick) $('model').value = pick.id;
+      if (pick) {
+        t.model = pick.id;
+        $('model').value = pick.id;
+        persist();
+      }
+    } else {
+      $('model').value = t.model;
     }
-    $('netChip').textContent = models.length + ' models';
-    $('netChip').classList.add('on');
-  } catch (_) {
-    $('netChip').textContent = 'gateway unreachable';
+  } catch (_) {}
+}
+
+function looksText(file) {
+  return /^text\//.test(file.type) ||
+    /\.(txt|md|js|mjs|ts|tsx|jsx|py|json|css|html|csv|log|ya?ml|sh|rs|go|java|c|h|cpp|rb|php)$/i.test(file.name);
+}
+
+function readFileAsText(file) {
+  return new Promise(function (resolve) {
+    var r = new FileReader();
+    r.onload = function () { resolve(r.result); };
+    r.onerror = function () { resolve(null); };
+    r.readAsText(file);
+  });
+}
+
+async function ingestFiles(fileList) {
+  var files = Array.from(fileList || []);
+  var i;
+  for (i = 0; i < files.length; i++) {
+    var f = files[i];
+    var name = f.webkitRelativePath || f.name;
+    var content = (looksText(f) && f.size < 400000) ? await readFileAsText(f) : null;
+    pendingFiles.push({ name: name, size: f.size, content: content });
+  }
+  renderAttachChips();
+  syncSend();
+}
+
+function corpusFromPending() {
+  return pendingFiles.map(function (f) {
+    if (f.content != null) return '--- ' + f.name + ' ---\n' + f.content;
+    return '--- ' + f.name + ' ---\n(binary, ' + f.size + ' bytes)';
+  }).join('\n\n');
+}
+
+async function remember(corpus, status) {
+  if (!corpus || !corpus.trim()) return;
+  var t = active();
+  if (status) setStatus(status);
+  try {
+    var ctx = await OpenZooPay.silentBind(corpus, payHooks(), t.memory);
+    if (ctx) {
+      t.memory = ctx;
+      t.attached = (t.attached || 0) + 1;
+      persist();
+      renderHeader();
+    }
+  } catch (e) {
+    setStatus(OpenZooPay.humanizePayError(e), 'warn');
   }
 }
 
-function bubble(text, mine, meta) {
-  var row = document.createElement('div');
-  row.className = 'row';
-  row.setAttribute('data-row', mine ? 'user' : 'assistant');
-  var wrap = document.createElement('div');
-  wrap.setAttribute('data-role', 'bubble-wrap');
-  var b = document.createElement('div');
-  b.className = 'bubble ' + (mine ? 'me' : 'zoo');
-  b.setAttribute('data-role', 'bubble');
-  b.textContent = text;
-  wrap.appendChild(b);
-  if (meta) {
-    var m = document.createElement('div');
-    m.className = 'meta';
-    m.setAttribute('data-role', 'bubble-meta');
-    m.textContent = meta;
-    wrap.appendChild(m);
-  }
-  row.appendChild(wrap);
-  $('chat').appendChild(row);
-  $('chat').scrollTop = $('chat').scrollHeight;
-  return b;
-}
-
-function applyReceipt(thinking, x402) {
-  var x = x402 || {};
-  state.calls += 1;
-  if (typeof x.billedUsd === 'number') state.spent += x.billedUsd;
-  if (typeof x.savesVsDirect === 'number' && x.savesVsDirect > 0) state.saved += x.savesVsDirect;
-  var bits = [];
-  if (typeof x.billedUsd === 'number') bits.push('$' + x.billedUsd.toFixed(4));
-  if (x.lecore && x.lecore.engaged) bits.push((x.lecore.recalled != null ? x.lecore.recalled : '?') + ' slices');
-  if (bits.length) {
-    var old = thinking.parentElement.querySelector('[data-role=bubble-meta]');
-    if (old) old.remove();
-    var meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.setAttribute('data-role', 'bubble-meta');
-    meta.textContent = bits.join(' · ');
-    thinking.insertAdjacentElement('afterend', meta);
-  }
-  renderTicker();
-}
-
-function renderTicker() {
-  $('spent').textContent = 'this session: $' + Number(state.spent || 0).toFixed(4);
-  $('saved').textContent = state.saved > 0 ? ('saved ~$' + Number(state.saved).toFixed(4) + ' vs direct') : '';
-  $('calls').textContent = state.calls ? (state.calls + (state.calls === 1 ? ' call' : ' calls')) : '';
-}
-
-function setCtxChip() {
-  var chip = $('ctxChip');
-  if (state.ctx) {
-    chip.hidden = false;
-    chip.classList.add('on');
-    chip.textContent = state.ctx.slice(0, 14) + '… attached';
-  } else {
-    chip.hidden = true;
-    chip.textContent = '';
-  }
+async function rememberHistory(t) {
+  var from = t.boundHistoryCount || 0;
+  var delta = t.messages.slice(from);
+  if (!delta.length) return;
+  var corpus = delta.map(function (h) {
+    return (h.role === 'user' ? 'you' : t.name) + ': ' + h.content;
+  }).join('\n');
+  try {
+    var ctx = await OpenZooPay.silentBind(corpus, payHooks(), t.memory);
+    if (ctx) {
+      t.memory = ctx;
+      t.boundHistoryCount = t.messages.length;
+      persist();
+    }
+  } catch (_) {}
 }
 
 async function send() {
-  var text = $('box').value.trim();
-  if (!text || state.busy) return;
+  var text = $('inp').value.trim();
+  if ((!text && !pendingFiles.length) || busy) return;
   if (!wallet.address) {
-    setRailChip('warn', 'connect Jupiter Wallet to pay chat');
+    setStatus('Connect Jupiter Wallet to pay.', 'warn');
     return;
   }
-  state.busy = true;
-  $('box').value = '';
-  $('sendBtn').disabled = true;
-  bubble(text, true);
-  state.messages.push({ role: 'user', content: text });
-  var thinking = bubble('…', false);
+  var t = active();
+  t.model = $('model').value || t.model;
+  busy = true;
+  $('inp').value = '';
+  syncSend();
+
+  var attached = pendingFiles.slice();
+  var attachCorpus = corpusFromPending();
+  pendingFiles = [];
+  renderAttachChips();
+
+  if (attachCorpus) {
+    var names = attached.map(function (f) { return f.name; }).join(', ');
+    if (!text) text = 'Look at what I attached: ' + names;
+    await remember(attachCorpus, 'Attaching…');
+  }
+
+  t.messages.push({ role: 'user', content: text });
+  t.lastActivityAt = Date.now();
+  if (t.name === 'openzoo' || t.name === 'new') t.name = text.slice(0, 28);
+  persist();
+  renderLog();
+  renderThreads();
+  var thinking = bubble('…', false, true);
+
   try {
     var headers = { 'Content-Type': 'application/json' };
-    if (state.ctx) headers['x-hrr-context'] = state.ctx;
+    if (t.memory) headers['x-hrr-context'] = t.memory;
     var res = await OpenZooPay.paidFetch('/v1/chat/completions', {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
-        model: $('model').value,
-        messages: state.messages,
-        max_tokens: maxTokens($('model').value)
+        model: t.model,
+        messages: t.messages,
+        max_tokens: maxTokens(t.model)
       })
     }, payHooks());
     var d = await res.json().catch(function () { return {}; });
-    if (res.status === 402) throw new Error('Gateway still required payment after X-PAYMENT');
-    if (!res.ok) {
-      throw new Error((d.error && d.error.message) || d.error || ('HTTP ' + res.status));
-    }
+    if (res.status === 402) throw new Error('Still waiting on payment. Approve in Jupiter Wallet and retry.');
+    if (!res.ok) throw new Error((d.error && d.error.message) || d.error || ('HTTP ' + res.status));
     var ch = d.choices && d.choices[0];
     var content = (ch && ch.message && ch.message.content) || '';
     if (!content && ch && ch.finish_reason === 'length') {
-      content = 'The model used the whole max_tokens budget thinking and returned no words. Try again.';
+      content = 'The model used the whole thinking budget and said nothing. Try again.';
     } else if (!content) {
-      content = (d.error && d.error.message) || 'Unexpected reply: ' + JSON.stringify(d).slice(0, 200);
+      content = (d.error && d.error.message) || 'Unexpected reply.';
     }
     thinking.textContent = content;
-    state.messages.push({ role: 'assistant', content: content });
-    applyReceipt(thinking, d.x402 || {});
-    $('railWarn').hidden = true;
+    thinking.parentElement.classList.remove('pending');
+    t.messages.push({ role: 'assistant', content: content });
+    var x = d.x402 || {};
+    t.calls += 1;
+    if (typeof x.billedUsd === 'number') t.spent += x.billedUsd;
+    if (typeof x.savesVsDirect === 'number' && x.savesVsDirect > 0) t.saved += x.savesVsDirect;
+    var bits = [];
+    if (typeof x.billedUsd === 'number') bits.push('$' + x.billedUsd.toFixed(4));
+    if (x.lecore && x.lecore.engaged) bits.push((x.lecore.recalled != null ? x.lecore.recalled : '?') + ' slices');
+    if (bits.length) {
+      var meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = bits.join(' · ');
+      thinking.insertAdjacentElement('afterend', meta);
+    }
     persist();
+    renderHud();
+    setStatus('');
+    rememberHistory(t);
   } catch (e) {
-    thinking.textContent = handlePayError(e);
-    state.messages.pop();
+    thinking.textContent = OpenZooPay.humanizePayError(e);
+    thinking.parentElement.classList.remove('pending');
+    t.messages.pop();
+    persist();
+    setStatus(OpenZooPay.humanizePayError(e), 'warn');
   }
-  state.busy = false;
-  $('sendBtn').disabled = false;
+  busy = false;
 }
 
-async function bind() {
-  var corpus = $('corpus').value;
-  if (!corpus.trim()) return;
-  $('bindStatus').textContent = 'binding…';
+function fmtAmt(raw, decimals) {
   try {
-    var res = await OpenZooPay.paidFetch('/v1/hrr/bind', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ corpus: corpus })
-    }, payHooks());
-    var d = await res.json().catch(function () { return {}; });
-    if (d.context_id) {
-      state.ctx = d.context_id;
-      $('bindStatus').textContent = 'bound ' + (corpus.length / 1000).toFixed(0) + 'k chars';
-      setCtxChip();
-      $('drawer').classList.remove('open');
-      $('brainBtn').classList.remove('on');
-      persist();
-    } else {
-      $('bindStatus').textContent = handlePayError({ message: d.error && d.error.message ? d.error.message : (d.error || 'bind failed') });
-    }
-  } catch (e) {
-    $('bindStatus').textContent = handlePayError(e);
+    return OpenZooPay.formatAtomic(raw, decimals);
+  } catch (_) {
+    return String(raw || '0');
   }
 }
 
-function closeDrawers() {
-  $('drawer').classList.remove('open');
-  $('statsDrawer').classList.remove('open');
-  $('brainBtn').classList.remove('on');
-  $('statsBtn').classList.remove('on');
-}
-
-function toggleDrawer(which) {
-  var open = which === 'bind' ? $('drawer') : $('statsDrawer');
-  var btn = which === 'bind' ? $('brainBtn') : $('statsBtn');
-  var willOpen = !open.classList.contains('open');
-  closeDrawers();
-  if (willOpen) {
-    open.classList.add('open');
-    btn.classList.add('on');
-    if (which === 'stats') loadStats();
+async function openWallet() {
+  $('walletOverlay').classList.add('show');
+  var body = $('walletBody');
+  body.textContent = 'loading…';
+  var html = '';
+  if (!wallet.address) {
+    body.innerHTML = '<div class="wnote">Connect Jupiter Wallet from the start screen.</div>';
+    return;
   }
-}
-
-async function loadStats() {
-  $('statsBox').textContent = 'loading…';
+  html += '<div class="wrow"><div class="wlab">Solana</div><div class="waddr"></div></div>';
+  body.innerHTML = html;
+  body.querySelector('.waddr').textContent = wallet.address;
   try {
-    var res = await fetch(GATEWAY + '/v1/stats');
-    var data = await res.json();
-    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
-    var t = data.today || {};
-    function cell(k, v) {
-      return '<div class="stat"><div class="k">' + escapeHtml(k) + '</div><div class="v">' +
-        escapeHtml(v == null ? '—' : String(v)) + '</div></div>';
-    }
-    $('statsBox').innerHTML =
-      '<div class="stats">' +
-        cell('calls today', t.calls) +
-        cell('paid', t.paid) +
-        cell('usd paid', t.usdPaid != null ? '$' + Number(t.usdPaid).toFixed(2) : '—') +
-        cell('leCore', t.lecoreSavingX != null ? t.lecoreSavingX + '×' : '—') +
-      '</div>' +
-      '<pre class="dump">' + escapeHtml(JSON.stringify({
-        app: data.app, today: data.today, growth: data.growth, topModels: (data.topModels || []).slice(0, 5)
-      }, null, 2)) + '</pre>';
-  } catch (e) {
-    $('statsBox').textContent = e.message || String(e);
+    var got = await OpenZooPay.fetchBalances(wallet.address);
+    var b = got.balances || {};
+    var lines = [
+      ['USDC', b[OpenZooWrap.USDC_MINT] || '0', 6],
+      ['TOKEN', b[OpenZooWrap.TOKEN_MINT] || '0', 6],
+      ['LEOS', b[OpenZooWrap.LEOS_MINT] || '0', 9]
+    ];
+    var box = document.createElement('div');
+    box.className = 'wbal';
+    box.textContent = lines.map(function (row) {
+      return row[0] + '  ' + fmtAmt(row[1], row[2]);
+    }).join('\n');
+    body.appendChild(box);
+    var note = document.createElement('div');
+    note.className = 'wnote';
+    note.textContent = 'USDC, TOKEN, or LEOS here is enough. The app tops up before a paid call when it needs to.';
+    body.appendChild(note);
+  } catch (_) {
+    var fail = document.createElement('div');
+    fail.className = 'wnote';
+    fail.textContent = 'Could not read holdings right now.';
+    body.appendChild(fail);
   }
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, function (c) {
-    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
-  });
+function closeSidebar() {
+  sidebarOpen = false;
+  $('sidebar').classList.remove('open');
 }
 
-function restore() {
-  state.messages.forEach(function (m) { bubble(m.content, m.role === 'user'); });
-  renderTicker();
-  if (state.model) $('model').value = state.model;
-  setCtxChip();
-}
-
-function setWalletUi() {
-  var chip = $('walletChip');
-  if (wallet.address) {
-    chip.textContent = wallet.address.slice(0, 4) + '…' + wallet.address.slice(-4);
-    chip.classList.add('on');
-  } else {
-    chip.textContent = 'no wallet';
-    chip.classList.remove('on');
-  }
+function openSidebar() {
+  sidebarOpen = true;
+  $('sidebar').classList.add('open');
 }
 
 window.addEventListener('message', function (event) {
@@ -333,42 +484,95 @@ window.addEventListener('message', function (event) {
   if (data.type === 'wallet-connected') {
     wallet.address = data.address;
     wallet.method = data.method;
-    setWalletUi();
+    renderHud();
   }
   if (data.type === 'wallet-disconnected') {
     wallet.address = null;
     wallet.method = null;
-    setWalletUi();
+    renderHud();
   }
 });
 window.parent.postMessage({ type: 'wallet-request-info' }, '*');
 
-$('sendBtn').onclick = send;
-$('box').addEventListener('keydown', function (e) {
+$('send').onclick = send;
+$('inp').addEventListener('input', syncSend);
+$('inp').addEventListener('keydown', function (e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
-$('brainBtn').onclick = function () { toggleDrawer('bind'); };
-$('statsBtn').onclick = function () { toggleDrawer('stats'); };
-$('bindBtn').onclick = bind;
-$('newBtn').onclick = function () {
-  try { localStorage.removeItem(SKEY); } catch (_) {}
-  location.reload();
+$('model').addEventListener('change', function () {
+  active().model = $('model').value;
+  persist();
+});
+$('search').addEventListener('input', renderThreads);
+$('newMsgBtn').onclick = function () {
+  var t = newThread('new');
+  threads.push(t);
+  activeId = t.id;
+  persist();
+  render();
+  closeSidebar();
+  $('inp').focus();
 };
+$('menuBtn').onclick = function () {
+  if (sidebarOpen) closeSidebar();
+  else openSidebar();
+};
+$('walletBtn').onclick = openWallet;
+$('walletClose').onclick = function () { $('walletOverlay').classList.remove('show'); };
+$('walletOverlay').addEventListener('click', function (e) {
+  if (e.target === $('walletOverlay')) $('walletOverlay').classList.remove('show');
+});
+$('hudBtn').onclick = function () { $('hud').classList.toggle('show'); };
 $('exit').onclick = function () {
   window.parent.postMessage({ type: 'wallet-disconnect' }, '*');
 };
-$('corpus').addEventListener('drop', function (e) {
-  e.preventDefault();
-  var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-  if (f) {
-    var reader = new FileReader();
-    reader.onload = function () { $('corpus').value = reader.result; };
-    reader.readAsText(f);
-  }
-});
-$('corpus').addEventListener('dragover', function (e) { e.preventDefault(); });
-$('model').addEventListener('change', persist);
 
-restore();
-setWalletUi();
+var plusMenu = $('plusMenu');
+$('plusBtn').onclick = function (e) {
+  e.stopPropagation();
+  plusMenu.classList.toggle('show');
+};
+document.addEventListener('click', function () { plusMenu.classList.remove('show'); });
+$('attachBtn').onclick = function (e) {
+  e.stopPropagation();
+  plusMenu.classList.remove('show');
+  $('fileInp').click();
+};
+$('folderBtn').onclick = function (e) {
+  e.stopPropagation();
+  plusMenu.classList.remove('show');
+  $('folderInp').click();
+};
+$('textBtn').onclick = function (e) {
+  e.stopPropagation();
+  plusMenu.classList.remove('show');
+  $('textAttachOverlay').classList.add('show');
+  $('textAttach').focus();
+};
+$('fileInp').addEventListener('change', async function () {
+  await ingestFiles($('fileInp').files);
+  $('fileInp').value = '';
+});
+$('folderInp').addEventListener('change', async function () {
+  await ingestFiles($('folderInp').files);
+  $('folderInp').value = '';
+});
+$('textAttachOk').onclick = function () {
+  var text = $('textAttach').value;
+  if (text.trim()) {
+    pendingFiles.push({ name: 'notes.txt', size: text.length, content: text });
+    renderAttachChips();
+    syncSend();
+  }
+  $('textAttach').value = '';
+  $('textAttachOverlay').classList.remove('show');
+};
+$('textAttachCancel').onclick = function () {
+  $('textAttachOverlay').classList.remove('show');
+};
+$('textAttachOverlay').addEventListener('click', function (e) {
+  if (e.target === $('textAttachOverlay')) $('textAttachOverlay').classList.remove('show');
+});
+
+render();
 loadModels();

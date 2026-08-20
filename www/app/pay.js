@@ -1,21 +1,20 @@
-/* OpenZoo x402 payment + gateway helpers.
-   Phone talks to https://x402-tokens.fly.dev directly (CORS live).
-   No localhost:8402. No @solana/web3.js. Do not rebuild the payment tx. */
+/* OpenZoo x402 + live /supported rails.
+   Phone talks to https://x402-tokens.fly.dev (CORS live). No local proxy hop.
+   402 pay: partial-sign only, never broadcast. Wrap may send. */
 'use strict';
 
-var OpenZooPay = (function () {
+var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
   var GATEWAY = 'https://x402-tokens.fly.dev';
   var RPC_URL = 'https://api.mainnet-beta.solana.com';
-  var TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
-  var TOKEN_LEGACY = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-  var TWIN_HINT = 'yUSDCx or wTOKENx';
+  var TOKEN_2022 = OpenZooWrap.TOKEN_2022;
+  var TOKEN_LEGACY = OpenZooWrap.TOKEN_LEGACY;
 
   function gatewayUrl(path) {
     return GATEWAY + path;
   }
 
   function railSymbol(row) {
-    return (row && row.extra && row.extra.symbol) || 'token';
+    return OpenZooWrap.railLabel(row) || ((row && row.extra && row.extra.symbol) || 'token');
   }
 
   function isSolanaExact(row) {
@@ -26,9 +25,10 @@ var OpenZooPay = (function () {
 
   function solanaRails(accepts) {
     var out = [];
-    var list = accepts || [];
-    for (var i = 0; i < list.length; i++) {
-      if (isSolanaExact(list[i])) out.push(list[i]);
+    var list = OpenZooWrap.hideDrained(accepts || []);
+    var i;
+    for (i = 0; i < list.length; i++) {
+      if (isSolanaExact(list[i]) && list[i].asset !== OpenZooWrap.DRAINED_MINT) out.push(list[i]);
     }
     return out;
   }
@@ -56,9 +56,7 @@ var OpenZooPay = (function () {
   }
 
   function bytesToB64(bytes) {
-    var bin = '';
-    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-    return btoa(bin);
+    return OpenZooCodec.bytesToB64(bytes);
   }
 
   function encodeXPayment(envelope, signedTxB64) {
@@ -76,8 +74,7 @@ var OpenZooPay = (function () {
     this.rails = rails || [];
     this.balances = balances || {};
     this.message = message ||
-      'This wallet cannot cover a Solana rail. Fund ' + TWIN_HINT +
-      ' (NAV-wrapped Token-2022 twins). Plain USDC cannot pay.';
+      'This wallet needs USDC, TOKEN, or LEOS before it can pay.';
   }
   UnpayableError.prototype = Object.create(Error.prototype);
 
@@ -90,30 +87,26 @@ var OpenZooPay = (function () {
       low.indexOf('custom program error') >= 0 ||
       low.indexOf('0x1') >= 0
     ) {
-      return 'Payment did not settle. The chosen rail is probably unfunded. ' +
-        'Fund ' + TWIN_HINT + ' in Jupiter Wallet — not plain USDC — then retry.';
+      return 'Payment did not settle. Top up this wallet with USDC, TOKEN, or LEOS, then retry.';
+    }
+    if (low.indexOf('sol') >= 0 && (low.indexOf('fee') >= 0 || low.indexOf('lamport') >= 0 || low.indexOf('rent') >= 0)) {
+      return 'Need a little SOL in this wallet to top up.';
     }
     return msg;
   }
 
   async function rpc(method, params) {
-    var res = await fetch(RPC_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params })
-    });
-    if (!res.ok) throw new Error('RPC HTTP ' + res.status);
-    var body = await res.json();
-    if (body.error) throw new Error(body.error.message || 'RPC error');
-    return body.result;
+    return OpenZooWrap.rpc(method, params, RPC_URL);
   }
 
   function addParsedBalances(result, into) {
     var value = (result && result.value) || [];
-    for (var i = 0; i < value.length; i++) {
+    var i;
+    for (i = 0; i < value.length; i++) {
       var info = value[i] && value[i].account && value[i].account.data &&
         value[i].account.data.parsed && value[i].account.data.parsed.info;
       if (!info || !info.mint || !info.tokenAmount) continue;
+      if (info.mint === OpenZooWrap.DRAINED_MINT) continue;
       var amt = String(info.tokenAmount.amount || '0');
       var prev = into[info.mint] || '0';
       try {
@@ -145,8 +138,10 @@ var OpenZooPay = (function () {
   function pickPayableRail(rails, balances) {
     if (!rails || !rails.length) return null;
     var have = balances || {};
-    for (var i = 0; i < rails.length; i++) {
+    var i;
+    for (i = 0; i < rails.length; i++) {
       var row = rails[i];
+      if (row.asset === OpenZooWrap.DRAINED_MINT) continue;
       var need;
       try { need = BigInt(row.maxAmountRequired || '0'); }
       catch (_) { continue; }
@@ -160,7 +155,8 @@ var OpenZooPay = (function () {
 
   function pickPreferredRail(rails, asset) {
     if (!asset) return null;
-    for (var i = 0; i < rails.length; i++) {
+    var i;
+    for (i = 0; i < rails.length; i++) {
       if (rails[i].asset === asset || railSymbol(rails[i]) === asset) return rails[i];
     }
     return null;
@@ -219,10 +215,68 @@ var OpenZooPay = (function () {
     return body;
   }
 
+  function underlyingHoldings(balances) {
+    return {
+      token: BigInt(balances[OpenZooWrap.TOKEN_MINT] || '0'),
+      usdc: BigInt(balances[OpenZooWrap.USDC_MINT] || '0'),
+      leos: BigInt(balances[OpenZooWrap.LEOS_MINT] || '0')
+    };
+  }
+
+  function pickWrappableRail(rails, balances, kinds) {
+    var have = underlyingHoldings(balances);
+    var i;
+    for (i = 0; i < rails.length; i++) {
+      var row = rails[i];
+      if (row.asset === OpenZooWrap.DRAINED_MINT) continue;
+      var pool = OpenZooWrap.acquireForMint(kinds, row.asset);
+      if (!pool) continue;
+      var under = BigInt(balances[pool.underlying] || '0');
+      if (under <= 0n) continue;
+      return { row: row, pool: pool, underlying: under };
+    }
+    var prefer = [
+      { mint: OpenZooWrap.TOKEN_MINT, have: have.token },
+      { mint: OpenZooWrap.USDC_MINT, have: have.usdc },
+      { mint: OpenZooWrap.LEOS_MINT, have: have.leos }
+    ];
+    for (i = 0; i < prefer.length; i++) {
+      if (prefer[i].have <= 0n) continue;
+      var twin = OpenZooWrap.findTwinForUnderlying(kinds, prefer[i].mint);
+      if (!twin) continue;
+      var match = pickPreferredRail(rails, twin.wrapped);
+      if (match) return { row: match, pool: twin, underlying: prefer[i].have };
+    }
+    return null;
+  }
+
+  async function topUpForRail(row, pool, balances, hooks) {
+    var need = BigInt(row.maxAmountRequired || '0');
+    var have = BigInt(balances[row.asset] || '0');
+    if (have >= need) return { wrapped: false };
+    var short = need - have;
+    var state = await OpenZooWrap.poolState(pool, RPC_URL);
+    var deposit = OpenZooWrap.depositForShares(short, state.reserves, state.supply);
+    var under = BigInt(balances[pool.underlying] || '0');
+    if (under < deposit) {
+      throw new UnpayableError([row], balances,
+        'This wallet needs more USDC, TOKEN, or LEOS to cover the call.');
+    }
+    if (hooks.onStatus) hooks.onStatus('Topping up…');
+    var compiled = await OpenZooWrap.compileWrapTx(pool, hooks.payer, deposit, RPC_URL);
+    if (pool.wrapped === OpenZooWrap.WTOKENx2) {
+      if (compiled.accountCount !== 9 || compiled.bump !== 254) {
+        throw new Error('wTOKENx2 wrap shape is wrong');
+      }
+    }
+    var sig = await OpenZooWrap.signAndSendViaBridge(compiled.transaction);
+    return { wrapped: true, signature: sig, deposit: deposit.toString() };
+  }
+
   async function chooseRail(accepts, hooks) {
     var rails = solanaRails(accepts);
     if (!rails.length) {
-      throw new Error('Gateway offered no payable Solana rail (EVM rows are not for this app).');
+      throw new Error('Nothing this phone can pay right now. Try again in a moment.');
     }
     var balances = {};
     var detected = false;
@@ -235,33 +289,54 @@ var OpenZooPay = (function () {
         detected = false;
       }
     }
+    var kinds = [];
+    try { kinds = await OpenZooWrap.acquireDirectory(); }
+    catch (_) { kinds = []; }
+
     var chosen = null;
+    var wrapPlan = null;
     if (detected) chosen = pickPayableRail(rails, balances);
     if (!chosen && hooks.preferredAsset) {
       var pref = pickPreferredRail(rails, hooks.preferredAsset);
       if (pref) chosen = pref;
     }
+    if (!chosen && detected && kinds.length) {
+      wrapPlan = pickWrappableRail(rails, balances, kinds);
+      if (wrapPlan) chosen = wrapPlan.row;
+    }
     if (!chosen) {
       throw new UnpayableError(rails, balances,
         detected
-          ? ('No Solana rail is funded. Need ' + TWIN_HINT +
-            '. Plain USDC cannot pay these Token-2022 twins.')
-          : ('Could not read balances. Do not guess rail 1. Fund ' + TWIN_HINT +
-            ' and pick a rail, or reconnect the wallet.')
+          ? 'This wallet needs USDC, TOKEN, or LEOS before it can pay.'
+          : 'Could not read this wallet. Reconnect Jupiter Wallet and retry.'
       );
     }
-    return { chosen: chosen, rails: rails, balances: balances, detected: detected };
+    return {
+      chosen: chosen,
+      rails: rails,
+      balances: balances,
+      detected: detected,
+      wrapPlan: wrapPlan
+    };
   }
 
   async function settle402(body, hooks) {
     hooks = hooks || {};
-    if (hooks.onStatus) hooks.onStatus('Selecting a Solana rail…');
+    if (hooks.onStatus) hooks.onStatus('Preparing payment…');
     var pick = await chooseRail(body.accepts, hooks);
     if (hooks.onRail) hooks.onRail(pick);
     if (!hooks.payer) throw new Error('Connect Jupiter Wallet to pay.');
-    if (hooks.onStatus) hooks.onStatus('Building payment for ' + railSymbol(pick.chosen) + '…');
+    if (pick.wrapPlan) {
+      await topUpForRail(pick.chosen, pick.wrapPlan.pool, pick.balances, hooks);
+      var again = await fetchBalances(hooks.payer);
+      pick.balances = again.balances;
+      if (pickPayableRail([pick.chosen], pick.balances) == null) {
+        throw new UnpayableError(pick.rails, pick.balances,
+          'Top-up finished but this wallet still cannot cover the call. Retry.');
+      }
+    }
+    if (hooks.onStatus) hooks.onStatus('Approve in Jupiter Wallet…');
     var built = await buildPayment(pick.chosen, hooks.payer);
-    if (hooks.onStatus) hooks.onStatus('Approve in Jupiter Wallet (sign only — not send)…');
     var signed = await signViaBridge(built.transaction);
     if (!signed) throw new Error('Wallet returned an empty signature');
     return {
@@ -296,14 +371,14 @@ var OpenZooPay = (function () {
     };
     if (init.body != null) requestInit.body = init.body;
 
-    if (hooks.onStatus) hooks.onStatus('Calling gateway…');
+    if (hooks.onStatus) hooks.onStatus('Talking to the zoo…');
     var res = await fetch(gatewayUrl(path), requestInit);
     if (res.status === 402) {
       var quote = await res.json().catch(function () { return {}; });
       var paid = await settle402(quote, hooks);
       headers = mergeHeaders(headers, { 'X-PAYMENT': paid.header });
       requestInit.headers = headers;
-      if (hooks.onStatus) hooks.onStatus('Retrying with X-PAYMENT…');
+      if (hooks.onStatus) hooks.onStatus('Retrying…');
       res = await fetch(gatewayUrl(path), requestInit);
       res._openzooRail = paid.rail;
     }
@@ -323,7 +398,8 @@ var OpenZooPay = (function () {
         buf += dec.decode(chunk.value, { stream: true });
         var parts = buf.split('\n');
         buf = parts.pop();
-        for (var i = 0; i < parts.length; i++) {
+        var i;
+        for (i = 0; i < parts.length; i++) {
           var line = parts[i];
           if (line.indexOf('data:') !== 0) continue;
           var data = line.slice(5).trim();
@@ -352,9 +428,28 @@ var OpenZooPay = (function () {
     return { text: text, stream: false, json: json };
   }
 
+  async function silentBind(corpus, hooks, contextId) {
+    if (!corpus || !String(corpus).trim()) return contextId || null;
+    var CHUNK = 512 * 1024;
+    var ctx = contextId || null;
+    var i;
+    for (i = 0; i < corpus.length; i += CHUNK) {
+      var part = corpus.slice(i, i + CHUNK);
+      var body = ctx ? { corpus: part, context_id: ctx } : { corpus: part };
+      var res = await paidFetch('/v1/hrr/bind', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }, hooks);
+      var d = await res.json().catch(function () { return {}; });
+      if (d.context_id) ctx = d.context_id;
+      else break;
+    }
+    return ctx;
+  }
+
   return {
     GATEWAY: GATEWAY,
-    TWIN_HINT: TWIN_HINT,
     gatewayUrl: gatewayUrl,
     solanaRails: solanaRails,
     isSolanaExact: isSolanaExact,
@@ -367,8 +462,15 @@ var OpenZooPay = (function () {
     humanizePayError: humanizePayError,
     fetchBalances: fetchBalances,
     pickPayableRail: pickPayableRail,
+    pickWrappableRail: pickWrappableRail,
     paidFetch: paidFetch,
     settle402: settle402,
-    readSseOrJson: readSseOrJson
+    readSseOrJson: readSseOrJson,
+    silentBind: silentBind
   };
-})();
+})(
+  typeof OpenZooWrap !== 'undefined' ? OpenZooWrap : require('./wrap.js'),
+  typeof OpenZooCodec !== 'undefined' ? OpenZooCodec : require('./codec.js')
+);
+
+if (typeof module !== 'undefined' && module.exports) module.exports = OpenZooPay;

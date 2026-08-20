@@ -5,70 +5,101 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://api.mainnet-beta.solana.com; img-src 'self' data:; style-src 'self' 'unsafe-inline';">
-  <title>OpenZoo</title>
+    content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://api.mainnet-beta.solana.com; img-src 'self' data:; style-src 'self' 'unsafe-inline';">
+  <title>openzoo</title>
   <link rel="stylesheet" href="app.css">
 </head>
-<body data-component="openzoo-app">
-  <header data-component="topbar">
-    <img class="mark" src="../mark.png" alt="" width="28" height="28">
-    <h1>openzoo</h1>
-    <span class="chip" id="walletChip" data-component="wallet-chip">no wallet</span>
-    <span style="flex:1"></span>
-    <button class="ghost" id="exit" data-testid="exit-button">exit</button>
-  </header>
+<body data-component="openzoo-grokui">
+  <div id="copiedToast" role="status" aria-live="polite">copied</div>
 
-  <div class="toolbar" data-component="toolbar">
-    <input id="model" list="modelList" data-component="model-picker" placeholder="pick a model…">
-    <datalist id="modelList"></datalist>
-    <button class="ghost" id="brainBtn" data-component="brain-toggle">bind</button>
-    <button class="ghost" id="statsBtn" data-component="stats-toggle">stats</button>
-    <button class="ghost" id="newBtn" data-component="new-chat">new</button>
+  <div id="sidebar" data-component="thread-sidebar">
+    <div id="sideTop">
+      <button class="icon-btn" id="newMsgBtn" title="New thread" data-testid="new-thread">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <input id="search" placeholder="Search" autocomplete="off">
+    </div>
+    <div id="threads" data-component="thread-list"></div>
   </div>
 
-  <div class="chips" data-component="chips">
-    <span class="chip" id="ctxChip" data-component="ctx-chip" hidden></span>
-    <span class="chip" id="netChip" data-component="net-chip">connecting…</span>
-    <span class="chip" id="railChip" data-component="rail-status" hidden></span>
-  </div>
-
-  <div id="railWarn" class="rail-warn" data-component="rail-warn" hidden></div>
-
-  <div id="drawer" class="drawer" data-component="brain-drawer">
-    <p class="tiny">Paste a corpus. Bind is free: <code>POST /v1/hrr/bind { corpus }</code> → <code>context_id</code>. Later chats send <code>x-hrr-context</code>. Not RUN / WRITE / READ / SERVE.</p>
-    <textarea id="corpus" data-component="corpus-input" placeholder="paste corpus… (or drop a .txt/.md file)"></textarea>
-    <div class="drawer-actions">
-      <button class="send" id="bindBtn" data-component="bind-button">bind it</button>
-      <span class="tiny" id="bindStatus" data-role="bind-status"></span>
+  <div id="walletOverlay" data-component="wallet-modal">
+    <div id="walletBox">
+      <h3>Your wallet</h3>
+      <div class="wsub">Jupiter Wallet on this Play Solana handheld. You pay per call from this address. The app tops up in the background when it can.</div>
+      <div id="walletBody">loading…</div>
+      <button class="dial" id="walletClose" type="button">close</button>
     </div>
   </div>
 
-  <div id="statsDrawer" class="drawer" data-component="stats-drawer">
-    <p class="tiny">Public <code>GET https://x402-tokens.fly.dev/v1/stats</code> — no wallet.</p>
-    <div id="statsBox" data-component="stats-box">loading…</div>
-  </div>
-
-  <div id="chat" data-component="chat-scroll">
-    <div class="row" data-row="welcome">
-      <div class="bubble zoo">
-        OpenZoo on Play Solana PSG1. Chat, bind, stats only — no RUN / WRITE / READ / SERVE.
-        Bind a corpus, then ask. The phone talks to x402-tokens.fly.dev (not localhost:8402).
+  <div id="textAttachOverlay" data-component="text-attach-modal">
+    <div id="textAttachBox">
+      <h3>Add notes</h3>
+      <p class="wsub">Paste anything you want this thread to remember. The app attaches it quietly — no extra steps.</p>
+      <textarea id="textAttach" placeholder="paste text…"></textarea>
+      <div class="text-attach-actions">
+        <button class="dial" id="textAttachCancel" type="button">cancel</button>
+        <button class="send-pill" id="textAttachOk" type="button">add</button>
       </div>
     </div>
   </div>
 
-  <footer data-component="composer-bar">
-    <div class="composer">
-      <textarea id="box" data-component="message-input" placeholder="message the zoo…" rows="2"></textarea>
-      <button class="send" id="sendBtn" data-component="send-button">send</button>
+  <div id="main" data-component="chat-main">
+    <div id="chatHeader">
+      <button class="icon-btn" id="menuBtn" title="Threads" data-testid="threads-toggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+      </button>
+      <div id="chatHeaderId"></div>
+      <div id="headerDials">
+        <input id="model" list="modelList" class="dial model" placeholder="model" data-component="model-picker">
+        <datalist id="modelList"></datalist>
+        <button class="dial" id="walletBtn" data-component="wallet-open" title="Wallet">wallet</button>
+        <button class="icon-btn" id="hudBtn" title="This session">◎</button>
+        <button class="icon-btn" id="exit" title="Exit" data-testid="exit-button">✕</button>
+      </div>
     </div>
-    <div class="ticker" data-component="ticker">
-      <span id="spent" data-role="spent-ticker">this session: $0.0000</span>
-      <span id="saved" data-role="saved-ticker"></span>
-      <span id="calls" data-role="calls-ticker"></span>
+    <div id="hud" data-component="session-hud">
+      <div class="htitle">THIS SESSION</div>
+      <div class="hrow"><span>you've paid</span><span id="hYouSpent">$0.0000</span></div>
+      <div class="hrow"><span>saved vs direct</span><span id="hYouSaved" class="hlime">—</span></div>
+      <div class="hrow"><span>calls</span><span id="hCalls">0</span></div>
+      <div class="hfoot" id="hFoot">Connect Jupiter Wallet to pay from this handheld.</div>
     </div>
-  </footer>
+    <div id="statusChip" class="status-chip" hidden data-component="status-chip"></div>
+    <div id="log" data-component="chat-scroll"></div>
+    <div id="bar">
+      <div id="plusMenu">
+        <div class="pop-item" id="attachBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          <span>Attach files</span>
+        </div>
+        <div class="pop-item" id="folderBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h6l2 2h10v10H3z"/></svg>
+          <span>Attach folder</span>
+        </div>
+        <div class="pop-item" id="textBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h16"/></svg>
+          <span>Add text</span>
+        </div>
+      </div>
+      <input id="fileInp" type="file" multiple>
+      <input id="folderInp" type="file" multiple webkitdirectory directory>
+      <div id="attachChips"></div>
+      <div id="row-input">
+        <div id="pill">
+          <button class="icon-btn" id="plusBtn" type="button" title="Attach">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+          <input id="inp" placeholder="Message" autocomplete="off" data-component="message-input">
+        </div>
+        <button id="send" type="button" data-component="send-button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
 
+  <script src="codec.js"></script>
+  <script src="wrap.js"></script>
   <script src="pay.js"></script>
   <script src="app.js"></script>
 </body>

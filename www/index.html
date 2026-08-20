@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://x402-tokens.fly.dev https://api.mainnet-beta.solana.com https: wss: ws:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self'; media-src 'self';">
+    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://api.mainnet-beta.solana.com https: wss: ws:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self'; media-src 'self';">
   <title>OpenZoo</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -115,7 +115,7 @@
     <button class="btn" onclick="launchApp()" data-testid="open-guest">
       OPEN WITHOUT WALLET
     </button>
-    <div class="hint">Stats and bind are free. Chat pays via x402 from the wallet.</div>
+    <div class="hint">Threads, chat, and wallet. Chat pays via x402 from this wallet.</div>
   </div>
 
   <div id="status" data-component="status"></div>
@@ -143,7 +143,7 @@
      ═══════════════════════════════════════════════ */
   var connectedAddress = null;   // wallet address after connect
   var connectedMethod  = null;   // 'MWA'
-  // Bundled OpenZoo UI. Do not point at a remote GAME_URL or localhost:8402.
+  // Bundled OpenZoo UI. Do not point at a remote GAME_URL or a local proxy.
   var GAME_URL    = 'app/index.html';
   var GAME_ORIGIN = '*'; // local file — no meaningful origin; use event.source check instead
 
@@ -313,6 +313,29 @@
         );
       } else {
         respondTx({ error: 'No wallet connected' });
+      }
+    }
+
+    // Wrap / top-up MAY broadcast. Never use this path for x402 payment.
+    if (data.type === 'wallet-sign-and-send-transaction') {
+      log('Sign+send request (wrap) — id:' + data.id);
+      var sendIframe = document.getElementById('game');
+      var respondSend = function(payload) {
+        payload.type = 'wallet-sign-and-send-response';
+        payload.id = data.id;
+        sendIframe.contentWindow.postMessage(payload, GAME_ORIGIN);
+      };
+      if (connectedMethod === 'MWA' && window.MWA && MWA.signAndSendTransaction) {
+        var wrapB64 = data.transaction || data.txB64 || '';
+        MWA.signAndSendTransaction(wrapB64,
+          function(result) {
+            log('Signed and sent wrap (MWA)');
+            respondSend({ signature: result.signature });
+          },
+          function(err) { log('Wrap send failed: ' + err); respondSend({ error: err }); }
+        );
+      } else {
+        respondSend({ error: 'No wallet connected' });
       }
     }
   });
