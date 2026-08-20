@@ -59,7 +59,7 @@ var OpenZooSpill = (function () {
   function hudSavingX(directUsd, spentUsd) {
     var spent = Number(spentUsd);
     var direct = Number(directUsd);
-    if (!(spent > 0) || !Number.isFinite(direct)) return null;
+    if (!(spent > 0) || !Number.isFinite(direct) || direct <= 0) return null;
     return Number((direct / spent).toFixed(4));
   }
 
