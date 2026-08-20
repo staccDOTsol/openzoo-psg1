@@ -869,4 +869,5 @@ window.addEventListener('pageshow', function () {
 });
 
 render();
+window.parent.postMessage({ type: 'openzoo-chrome-ready' }, '*');
 loadModels();

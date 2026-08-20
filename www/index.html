@@ -108,9 +108,40 @@
       font-size: 10px; letter-spacing: 1.6px;
       color: rgba(232, 240, 220, 0.42);
     }
+
+    /* Dark launch loader — covers the blank after native splash / during launchApp.
+       No logo. z-index above the game iframe (9999). Background matches config.xml. */
+    #oz-boot {
+      position: fixed;
+      top: 0; right: 0; bottom: 0; left: 0;
+      z-index: 10000;
+      background: #0A080D;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.22em;
+      text-transform: lowercase;
+      color: rgba(244, 241, 251, 0.48);
+    }
+    #oz-boot.oz-boot-off { display: none; }
+    .oz-boot-dots { display: inline-block; width: 1.4em; text-align: left; }
+    .oz-boot-dots span {
+      display: inline-block;
+      opacity: 0;
+      animation: oz-boot-dot 1.2s infinite;
+    }
+    .oz-boot-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .oz-boot-dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes oz-boot-dot {
+      0%, 20% { opacity: 0; }
+      40%, 100% { opacity: 1; }
+    }
   </style>
 </head>
 <body>
+  <div id="oz-boot" role="status" aria-live="polite">starting<span class="oz-boot-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></div>
   <div class="logo" data-component="logo"><img src="mark.png" alt="OpenZoo"></div>
   <div class="title" data-component="title">OPENZOO</div>
   <div class="sub" data-component="subtitle">Play Solana PSG1</div>
@@ -164,9 +195,32 @@
   var $status    = document.getElementById('status');
   var $connected = document.getElementById('connected');
   var $addr      = document.getElementById('addr');
+  var $boot      = document.getElementById('oz-boot');
+  var bootDismissed = false;
+  var bootFallbackTimer = null;
+  var bootTimeoutTimer = null;
 
   function log(msg) {
     console.log('[wallet-shell] ' + msg);
+  }
+
+  function showBootOverlay() {
+    bootDismissed = false;
+    clearTimeout(bootFallbackTimer);
+    clearTimeout(bootTimeoutTimer);
+    bootFallbackTimer = null;
+    bootTimeoutTimer = null;
+    if ($boot) $boot.classList.remove('oz-boot-off');
+  }
+
+  function hideBootOverlay() {
+    if (bootDismissed) return;
+    bootDismissed = true;
+    clearTimeout(bootFallbackTimer);
+    clearTimeout(bootTimeoutTimer);
+    bootFallbackTimer = null;
+    bootTimeoutTimer = null;
+    if ($boot) $boot.classList.add('oz-boot-off');
   }
 
   function setStatus(msg) {
@@ -256,6 +310,9 @@
   }
 
   function launchApp() {
+    // Re-show the dark loader for the blank between tap and first grokui paint.
+    // Stay up across iframe create — do not hide here. App posts openzoo-chrome-ready.
+    showBootOverlay();
     $picker.style.display = 'none';
     $connected.style.display = 'none';
 
@@ -267,6 +324,12 @@
     iframe.allow = 'fullscreen';
     iframe.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;border:none;z-index:9999;';
     document.body.appendChild(iframe);
+
+    iframe.addEventListener('load', function onBootFallback() {
+      iframe.removeEventListener('load', onBootFallback);
+      bootFallbackTimer = setTimeout(hideBootOverlay, 50);
+    });
+    bootTimeoutTimer = setTimeout(hideBootOverlay, 4000);
 
     if (connectedAddress) {
       var sendWalletInfo = function() {
@@ -339,6 +402,11 @@
     if (!gameFrame || event.source !== gameFrame.contentWindow) return;
     var data = event.data;
     if (!data || !data.type) return;
+
+    if (data.type === 'openzoo-chrome-ready') {
+      log('Chrome ready — dismissing launch overlay');
+      hideBootOverlay();
+    }
 
     if (data.type === 'wallet-disconnect') {
       log('App requested disconnect');
@@ -445,6 +513,11 @@
      Init
      ═══════════════════════════════════════════════ */
   log('Shell loaded');
+
+  // First-run CONNECT / guest picker: overlay is only for launchApp blanks.
+  document.addEventListener('DOMContentLoaded', function () {
+    hideBootOverlay();
+  });
 
   $addr.addEventListener('click', function () {
     if (!connectedAddress) return;
