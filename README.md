@@ -1,22 +1,18 @@
 # OpenZoo — Play Solana PSG1
 
-OpenZoo on the [Play Solana](https://playsolana.com) Gen1 handheld (PSG1): **CHAT**, **BIND**, and **STATS** only. The Cordova shell owns [Mobile Wallet Adapter](https://docs.solanamobile.com/getting-started/overview); the bundled UI talks to `https://x402-tokens.fly.dev` directly. CORS is live. There is no `localhost:8402` hop.
+OpenZoo on the [Play Solana](https://playsolana.com) Gen1 handheld: the **grokui** product (threads, chat, wallet), not a thin fly.dev form. Bind is abstract — attach files, a folder, or text, and the app remembers them behind the scenes. Native wallet is **Jupiter Wallet** via [Mobile Wallet Adapter](https://docs.solanamobile.com/getting-started/overview). Same payment path as Seeker. There is no iOS target and no iOS deeplink.
 
 Widget / package id: **`fun.openzoo.psg1`**.
 
-Native wallet on PSG1 is **Jupiter Wallet** via MWA. Phantom is a generic-Android test fallback only — not the PSG1 native path.
-
-This tree is Android + EchOS. There is no iOS target and no iOS section.
+The phone talks to `https://x402-tokens.fly.dev` directly. CORS is live. There is no local proxy hop.
 
 ## What ships
 
 | Surface | Role |
 |---|---|
 | `www/index.html` | Wallet shell. Owns MWA. Never app logic. |
-| `www/app/` | Bundled OpenZoo UI — desktop GUI trim: chat, bind drawer, session spend ticker, stats drawer |
-| `cordova-plugin-mwa` | Native MWA: `authorize`, `signMessage`, **`signTransaction`**, `signAndSendTransaction`. Wallet dialog identity is OpenZoo / https://openzoo.fun |
-
-`https://www.openzoo.fun/chat` is a stall page and is **not** iframed. `GAME_URL` is `app/index.html`; CSP `frame-src` is `'self'`. Desktop RUN / WRITE / READ / SERVE are **not** ported and must not be claimed. The demo clicker in `www/game/` is unused.
+| `www/app/` | grokui-on-a-phone: thread sidebar, chat canvas, wallet overlay |
+| `cordova-plugin-mwa` | Native MWA: `authorize`, `signMessage`, `signTransaction` (402), `signAndSendTransaction` (wrap only) |
 
 ```
 ┌────────────────────────────────────────────┐
@@ -24,7 +20,8 @@ This tree is Android + EchOS. There is no iOS target and no iOS section.
 │  • MWA connect — Jupiter Wallet on PSG1    │
 │  ┌──────────────────────────────────────┐  │
 │  │ iframe: www/app/                     │  │
-│  │  chat / bind / stats                 │  │
+│  │  threads / chat / wallet             │  │
+│  │  attach files quietly                │  │
 │  │  POST https://x402-tokens.fly.dev    │  │
 │  └──────────────────────────────────────┘  │
 └────────────────────────────────────────────┘
@@ -38,82 +35,47 @@ Bridge messages:
 | shell → app | `wallet-disconnected` | — |
 | app → shell | `wallet-request-info` | late init |
 | app → shell | `wallet-disconnect` | exit to shell |
-| app → shell | `wallet-sign-message` | `{ id, message }` → `wallet-sign-response` |
-| app → shell | `wallet-sign-transaction` | `{ id, transaction }` → `wallet-sign-transaction-response` |
+| app → shell | `wallet-sign-transaction` | `{ id, transaction }` → partial-sign only |
+| app → shell | `wallet-sign-and-send-transaction` | `{ id, transaction }` → wrap / top-up may send |
 
-`wallet-sign-transaction` calls **`MWA.signTransaction`** (partial-sign, do not submit). Never `MWA.signAndSendTransaction` — that broadcasts the tx and breaks x402 (the gateway feePayer must complete it).
+`wallet-sign-transaction` calls **`MWA.signTransaction`**. Never `signAndSendTransaction` for x402 — the gateway feePayer must complete settlement. Wrap / top-up is the only send path.
 
-## Payment path
+## Payment
 
-1. `POST https://x402-tokens.fly.dev/v1/chat/completions` (any `Authorization` string; payment is the auth).
-2. On **402**: pick a *payable Solana* row from `accepts[]` (`scheme` exact, `network` `solana:…`). EVM/`eip155` rows are ignored. The first Solana row is **not** always payable — rails are NAV-wrapped Token-2022 twins (`yUSDCx`, `wTOKENx`, …). Plain USDC cannot pay.
-3. `POST https://x402-tokens.fly.dev/v1/pay/build` with `{ accept, payer }` → `{ transaction, envelope }`.
-4. Bridge → `MWA.signTransaction(txB64)`. Do not rebuild the tx; the compute-budget nonce inside `/v1/pay/build` is load-bearing.
-5. Retry the original request with `X-PAYMENT: base64(envelope with signed tx in payload.transaction)`.
+1. Rails come from live `GET https://x402.accrue.fund/supported`.
+2. `POST https://x402-tokens.fly.dev/v1/chat/completions` (any `Authorization`; payment is the auth).
+3. On **402**: keep Solana `exact` rows. Hide drained mint `Bo7xBF7SY8EyUBPUxRP66SFafxoPf2n5uqiLjbxEebx9`. Mint `FXYkwMtfKpA174rp8ixVeiGs5TYGaBsYRrHE3KrR449B` is **wTOKENx2**, never wTOKENx.
+4. If the wallet already holds a live twin, pay that rail.
+5. Else ez-mode wrap: detect TOKEN (`EVULoNF4…`), USDC, LEOS, or a live twin, and wrap via wrap-nav `FrSERTNCPvTtaDS9AvQp9u1nYGzXDb3kC9MdL8Xxn2NE` using directory `acquire`. wTOKENx2 is **nine accounts**, bump **254** (see `staccDOTsol/openzoo` `lib/wrap.js`). Wrap **may send**.
+6. `POST /v1/pay/build` → `MWA.signTransaction` → retry with `X-PAYMENT`. Partial-sign only. Do not rebuild the payment tx.
 
-If no Solana rail can be covered, the UI steers the user to fund **yUSDCx** or **wTOKENx** in Jupiter Wallet. This build does not wrap-on-device.
+The UI never shows context ids, bind routes, bind hashes, or wrap-twin homework. Wallet copy talks about USDC / TOKEN / LEOS.
 
-Bind is `POST /v1/hrr/bind` (`corpus` or `items: [{text}]`). The returned `context_id` is sent on later chats as `x-hrr-context`. Stats is `GET /v1/stats` (public).
+Desktop RUN / WRITE / READ / SERVE are not on this handheld.
 
 ## Build the Android APK
 
-Requirements on the build machine: **Node 18+**, **JDK 17** (or 21), **Android SDK** (platform 35 / build-tools as required by `cordova-android` 14), and a device or emulator only if you want to install.
-
 ```bash
-npm install -g cordova
 npm install
 npx cordova prepare android
+npm test
+npm run verify:gateway
 npm run build
 ```
 
-Debug APK path after a successful local build:
+Debug APK: `platforms/android/app/build/outputs/apk/debug/app-debug.apk`
 
-```
-platforms/android/app/build/outputs/apk/debug/app-debug.apk
-```
+`platforms/` and `plugins/` are gitignored.
 
-`platforms/` and `plugins/` are gitignored — they are generated by `cordova prepare`.
+Release: copy `build.example.json` to `build.json`, then `npm run build:release`.
 
-Release:
-
-1. `keytool -genkey -v -keystore release.keystore -alias your-alias -keyalg RSA -keysize 2048 -validity 10000`
-2. `cp build.example.json build.json` and fill in passwords. **`build.json` and `*.keystore` are gitignored.**
-3. `npm run build:release`
-
-Check the toolchain with `npm run requirements` (`cordova requirements android`).
-
-This cloud workspace produced a debug APK after installing Android SDK platform 35, build-tools 35.0.0, and Gradle 8.13. The APK is **not committed** (`platforms/` is gitignored). On a Mac/Linux box with those tools:
-
-```bash
-export ANDROID_HOME=/path/to/android-sdk
-export JAVA_HOME=/path/to/jdk-17-or-21
-export PATH="$ANDROID_HOME/platform-tools:$PATH:/path/to/gradle-8.13/bin"
-npm install
-npx cordova prepare android
-npm run build
-```
-
-Missing pieces if `cordova requirements android` fails: `ANDROID_HOME`, `platforms;android-35`, `build-tools;35.0.0`, and Gradle **8.13** (matches `cordova-android` 14).
-
-Optional live check (no wallet, no settle): `npm run verify:gateway` — confirms CORS, Solana-vs-EVM rail split, `/v1/pay/build` envelope, `/v1/hrr/bind`, and `/v1/stats`.
-
-## PlayVerse / PlayGate (consumer PSG1)
-
-Consumer PSG1 devices **cannot sideload**. Users install only from the [PlayVerse](https://playsolana.com) catalog. To reach a consumer handheld, submit the APK through [PlayGate](https://playgate.playsolana.com/) or use a **PSG1 DevKit**. A debug APK is for DevKit / generic Android test devices, not for consumer store install.
-
-## What still needs a real device
-
-MWA cannot run in a browser or in an emulator that has no wallet app.
-
-- **PSG1 (target):** Jupiter Wallet via MWA — connect, `signTransaction`, full 402 → pay/build → `X-PAYMENT` loop.
-- **Generic Android (fallback only):** Phantom or another MWA wallet to exercise the same bridge. This is not the PSG1 native wallet and must not be written as the primary path.
+Consumer PSG1 devices cannot sideload. Ship through [PlayGate](https://playgate.playsolana.com/) or a DevKit.
 
 ## Explicit non-goals
 
-- **No iOS.** `cordova-plugin-mwa` is Java; MWA is not the iOS story.
-- **No `localhost:8402`.** The phone calls `https://x402-tokens.fly.dev` directly.
-- **No Seeker-store copy, Seeker Vault copy, or “install Phantom on PSG1” as the primary path.**
-- **No desktop RUN / WRITE / READ / SERVE.**
+- **No iOS.** MWA is Java. No Phantom/Solflare deeplinks.
+- **No local proxy hop.** The phone calls the live gateway.
+- **No Seeker-store copy** as the primary path. Jupiter Wallet on PSG1 is native.
 
 ## License
 
