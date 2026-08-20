@@ -26,7 +26,7 @@
     <preference name="StatusBarStyle" value="lightcontent" />
     <preference name="KeepRunning" value="true" />
     <preference name="Orientation" value="default" />
-    <preference name="BackgroundColor" value="0xff080a08" />
+    <preference name="BackgroundColor" value="0xff0A080D" />
     <preference name="SplashScreenDelay" value="0" />
     <preference name="FadeSplashScreen" value="false" />
     <preference name="AutoHideSplashScreen" value="true" />
@@ -34,7 +34,7 @@
 
     <!-- Android specific -->
     <platform name="android">
-        <preference name="AndroidWindowSplashScreenBackground" value="#080a08" />
+        <preference name="AndroidWindowSplashScreenBackground" value="#0A080D" />
         <preference name="AndroidPersistentFileLocation" value="Compatibility" />
         <preference name="AndroidInsecureFileModeEnabled" value="true" />
         <preference name="immersiveMode" value="true" />

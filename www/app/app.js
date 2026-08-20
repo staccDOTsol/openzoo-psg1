@@ -1,104 +1,75 @@
 'use strict';
 
-var SYSTEM_PROMPT =
-  'You are OpenZoo on a Play Solana PSG1 handheld. You can chat. ' +
-  'The user may attach holographic / HRR context via Bind (x-hrr-context). ' +
-  'You do not have RUN, WRITE, READ, or SERVE tools, a filesystem, or a shell. ' +
-  'Do not claim those work. Do not invent tool results.';
+var $ = function (id) { return document.getElementById(id); };
+var SKEY = 'openzoo.psg1.session.v1';
+var GATEWAY = 'https://x402-tokens.fly.dev';
 
-var DEFAULT_MODELS = [
-  'openai/gpt-4o-mini',
-  'google/gemini-2.5-flash',
-  'google/gemini-3.7-flash',
-  'nvidia/nemotron-3.5-lightning',
-  'x-ai/grok-4.6'
-];
+var persisted = {};
+try { persisted = JSON.parse(localStorage.getItem(SKEY) || '{}'); } catch (_) {}
+
+var state = {
+  messages: persisted.messages || [],
+  ctx: persisted.ctx || null,
+  spent: persisted.spent || 0,
+  saved: persisted.saved || 0,
+  calls: persisted.calls || 0,
+  model: persisted.model || '',
+  busy: false
+};
 
 var wallet = { address: null, method: null };
-var tab = 'chat';
-var messages = [];
-var contextId = '';
-var namespace = '';
 var preferredAsset = '';
-var sending = false;
 
-var $ = function (id) { return document.getElementById(id); };
-
-function shortAddr(a) {
-  if (!a) return 'not connected';
-  return a.slice(0, 4) + '…' + a.slice(-4);
-}
-
-function setRail(kind, html) {
-  var el = $('rail');
-  el.className = 'rail' + (kind ? ' ' + kind : '');
-  el.innerHTML = html;
-}
-
-function setWalletUi() {
-  $('wallet-label').textContent = wallet.address
-    ? shortAddr(wallet.address) + ' · ' + (wallet.method || 'MWA')
-    : 'not connected';
-  if (!wallet.address) {
-    setRail('', 'Connect <strong>Jupiter Wallet</strong> (MWA) to pay Solana rails. Stats are free.');
-  } else if (!$('rail').classList.contains('warn') && !$('rail').classList.contains('ok')) {
-    setRail('', 'Wallet <strong>' + shortAddr(wallet.address) +
-      '</strong>. Settlement needs <strong>yUSDCx</strong> or <strong>wTOKENx</strong> — not plain USDC.');
-  }
-}
-
-function showTab(name) {
-  tab = name;
-  ['chat', 'bind', 'stats'].forEach(function (id) {
-    $('tab-' + id).classList.toggle('active', id === name);
-    $('panel-' + id).classList.toggle('active', id === name);
-  });
-  if (name === 'stats') loadStats();
-}
-
-function appendMsg(role, text) {
-  var log = $('chat-log');
-  var el = document.createElement('div');
-  el.className = 'msg ' + role;
-  el.textContent = text;
-  log.appendChild(el);
-  log.scrollTop = log.scrollHeight;
-  return el;
+function persist() {
+  try {
+    localStorage.setItem(SKEY, JSON.stringify({
+      messages: state.messages,
+      ctx: state.ctx,
+      spent: state.spent,
+      saved: state.saved,
+      calls: state.calls,
+      model: $('model').value || ''
+    }));
+  } catch (_) {}
 }
 
 function payHooks() {
   return {
     payer: wallet.address,
-    contextId: contextId || undefined,
-    namespace: namespace || undefined,
+    contextId: state.ctx || undefined,
     preferredAsset: preferredAsset || undefined,
-    onStatus: function (msg) { setRail('', msg); },
+    onStatus: function (msg) { setRailChip('', msg); },
     onRail: function (pick) {
-      var row = pick.chosen;
-      setRail('ok', 'Paying with <strong>' + OpenZooPay.railSymbol(row) + '</strong> · ' +
-        OpenZooPay.describeRail(row));
+      setRailChip('on', 'paying ' + OpenZooPay.railSymbol(pick.chosen));
     }
   };
 }
 
+function setRailChip(kind, text) {
+  var el = $('railChip');
+  el.hidden = !text;
+  el.className = 'chip' + (kind ? ' ' + kind : '');
+  el.textContent = text || '';
+}
+
 function showUnpayable(err) {
+  var box = $('railWarn');
   var rails = (err && err.rails) || [];
-  var lines = rails.map(function (r) { return OpenZooPay.describeRail(r); });
-  setRail('warn',
-    '<strong>Need yUSDCx or wTOKENx</strong> to pay. ' +
-    'Solana rails settle in NAV-wrapped Token-2022 twins, not plain USDC. ' +
-    'Fund a twin in Jupiter Wallet, then retry.' +
-    (lines.length ? '<div class="rails-list">' + rails.map(function (r) {
+  box.hidden = false;
+  box.innerHTML =
+    '<strong>Need yUSDCx or wTOKENx</strong> — Solana rails settle in NAV-wrapped Token-2022 twins, not plain USDC. Fund a twin in Jupiter Wallet, then retry.' +
+    (rails.length ? '<div class="rails-list">' + rails.map(function (r) {
       return '<button class="rail-pick" data-asset="' + r.asset + '">' +
         OpenZooPay.describeRail(r) + '</button>';
-    }).join('') + '</div>' : '')
-  );
-  $('rail').querySelectorAll('.rail-pick').forEach(function (btn) {
+    }).join('') + '</div>' : '');
+  box.querySelectorAll('.rail-pick').forEach(function (btn) {
     btn.addEventListener('click', function () {
       preferredAsset = btn.getAttribute('data-asset');
-      setRail('', 'Will try <strong>' + preferredAsset.slice(0, 6) + '…</strong> on the next paid call. This is not wrap-on-device.');
+      box.hidden = true;
+      setRailChip('', 'will try selected rail next (not wrap-on-device)');
     });
   });
+  setRailChip('warn', 'need yUSDCx or wTOKENx');
 }
 
 function handlePayError(err) {
@@ -107,143 +78,228 @@ function handlePayError(err) {
     return err.message;
   }
   var msg = OpenZooPay.humanizePayError(err);
-  setRail('bad', msg);
+  setRailChip('bad', msg);
   return msg;
 }
 
-async function sendChat() {
-  if (sending) return;
-  var text = $('prompt').value.trim();
-  if (!text) return;
-  if (!wallet.address) {
-    setRail('warn', 'Connect <strong>Jupiter Wallet</strong> before chat. Payment is the auth.');
-    return;
-  }
-  $('prompt').value = '';
-  messages.push({ role: 'user', content: text });
-  appendMsg('user', text);
-  var bubble = appendMsg('assistant', '…');
-  sending = true;
-  $('send').disabled = true;
+function maxTokens(model) {
+  return /deepseek|grok|thinking|fable|sonnet-5|-r1|reason/i.test(model || '') ? 16384 : 4096;
+}
+
+function keepModel(id) {
+  return id && id.charAt(0) !== '~' && id.indexOf(':batch') < 0;
+}
+
+async function loadModels() {
   try {
-    var body = {
-      model: $('model').value,
-      messages: [{ role: 'system', content: SYSTEM_PROMPT }].concat(messages),
-      max_tokens: 512,
-      stream: true
-    };
-    var res = await OpenZooPay.paidFetch('/v1/chat/completions', {
-      method: 'POST',
-      body: JSON.stringify(body)
-    }, payHooks());
-    if (res.status === 402) {
-      throw new Error('Gateway still required payment after X-PAYMENT');
+    var r = await fetch(GATEWAY + '/v1/models');
+    if (r.status === 402) {
+      r = await OpenZooPay.paidFetch('/v1/models', { method: 'GET', body: null }, payHooks());
     }
-    if (!res.ok) {
-      var fail = await res.json().catch(function () { return {}; });
-      throw new Error((fail.error && fail.error.message) || fail.error || ('HTTP ' + res.status));
-    }
-    var out = await OpenZooPay.readSseOrJson(res, function (full) {
-      bubble.textContent = full || '…';
-      $('chat-log').scrollTop = $('chat-log').scrollHeight;
+    var d = await r.json();
+    var models = (d.data || []).filter(function (m) { return keepModel(m.id); });
+    models.sort(function (a, b) { return a.id.localeCompare(b.id); });
+    var dl = $('modelList');
+    dl.innerHTML = '';
+    models.forEach(function (m) {
+      var o = document.createElement('option');
+      o.value = m.id;
+      dl.appendChild(o);
     });
-    var reply = out.text || '(empty reply)';
-    bubble.textContent = reply;
-    messages.push({ role: 'assistant', content: reply });
-    if (res._openzooRail) {
-      setRail('ok', 'Settled with <strong>' + OpenZooPay.railSymbol(res._openzooRail) + '</strong>');
+    if (!$('model').value) {
+      var pick = models.filter(function (m) { return m.id.indexOf('gpt-4o-mini') >= 0; })[0]
+        || models.filter(function (m) { return m.id.indexOf('gemini-2.5-flash') >= 0; })[0]
+        || models[0];
+      if (pick) $('model').value = pick.id;
     }
-  } catch (err) {
-    var msg = handlePayError(err);
-    bubble.textContent = msg;
-    messages.pop();
-  } finally {
-    sending = false;
-    $('send').disabled = false;
+    $('netChip').textContent = models.length + ' models';
+    $('netChip').classList.add('on');
+  } catch (_) {
+    $('netChip').textContent = 'gateway unreachable';
   }
 }
 
-async function doBind() {
-  var corpus = $('corpus').value.trim();
-  if (!corpus) {
-    $('bind-result').textContent = 'Paste a corpus first. Bind does not invent success.';
+function bubble(text, mine, meta) {
+  var row = document.createElement('div');
+  row.className = 'row';
+  row.setAttribute('data-row', mine ? 'user' : 'assistant');
+  var wrap = document.createElement('div');
+  wrap.setAttribute('data-role', 'bubble-wrap');
+  var b = document.createElement('div');
+  b.className = 'bubble ' + (mine ? 'me' : 'zoo');
+  b.setAttribute('data-role', 'bubble');
+  b.textContent = text;
+  wrap.appendChild(b);
+  if (meta) {
+    var m = document.createElement('div');
+    m.className = 'meta';
+    m.setAttribute('data-role', 'bubble-meta');
+    m.textContent = meta;
+    wrap.appendChild(m);
+  }
+  row.appendChild(wrap);
+  $('chat').appendChild(row);
+  $('chat').scrollTop = $('chat').scrollHeight;
+  return b;
+}
+
+function applyReceipt(thinking, x402) {
+  var x = x402 || {};
+  state.calls += 1;
+  if (typeof x.billedUsd === 'number') state.spent += x.billedUsd;
+  if (typeof x.savesVsDirect === 'number' && x.savesVsDirect > 0) state.saved += x.savesVsDirect;
+  var bits = [];
+  if (typeof x.billedUsd === 'number') bits.push('$' + x.billedUsd.toFixed(4));
+  if (x.lecore && x.lecore.engaged) bits.push((x.lecore.recalled != null ? x.lecore.recalled : '?') + ' slices');
+  if (bits.length) {
+    var old = thinking.parentElement.querySelector('[data-role=bubble-meta]');
+    if (old) old.remove();
+    var meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.setAttribute('data-role', 'bubble-meta');
+    meta.textContent = bits.join(' · ');
+    thinking.insertAdjacentElement('afterend', meta);
+  }
+  renderTicker();
+}
+
+function renderTicker() {
+  $('spent').textContent = 'this session: $' + Number(state.spent || 0).toFixed(4);
+  $('saved').textContent = state.saved > 0 ? ('saved ~$' + Number(state.saved).toFixed(4) + ' vs direct') : '';
+  $('calls').textContent = state.calls ? (state.calls + (state.calls === 1 ? ' call' : ' calls')) : '';
+}
+
+function setCtxChip() {
+  var chip = $('ctxChip');
+  if (state.ctx) {
+    chip.hidden = false;
+    chip.classList.add('on');
+    chip.textContent = state.ctx.slice(0, 14) + '… attached';
+  } else {
+    chip.hidden = true;
+    chip.textContent = '';
+  }
+}
+
+async function send() {
+  var text = $('box').value.trim();
+  if (!text || state.busy) return;
+  if (!wallet.address) {
+    setRailChip('warn', 'connect Jupiter Wallet to pay chat');
     return;
   }
-  var payload = { corpus: corpus };
-  var existing = $('context-id').value.trim();
-  if (existing) payload.context_id = existing;
-  $('bind-go').disabled = true;
-  $('bind-result').textContent = 'Binding…';
+  state.busy = true;
+  $('box').value = '';
+  $('sendBtn').disabled = true;
+  bubble(text, true);
+  state.messages.push({ role: 'user', content: text });
+  var thinking = bubble('…', false);
+  try {
+    var headers = { 'Content-Type': 'application/json' };
+    if (state.ctx) headers['x-hrr-context'] = state.ctx;
+    var res = await OpenZooPay.paidFetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({
+        model: $('model').value,
+        messages: state.messages,
+        max_tokens: maxTokens($('model').value)
+      })
+    }, payHooks());
+    var d = await res.json().catch(function () { return {}; });
+    if (res.status === 402) throw new Error('Gateway still required payment after X-PAYMENT');
+    if (!res.ok) {
+      throw new Error((d.error && d.error.message) || d.error || ('HTTP ' + res.status));
+    }
+    var ch = d.choices && d.choices[0];
+    var content = (ch && ch.message && ch.message.content) || '';
+    if (!content && ch && ch.finish_reason === 'length') {
+      content = 'The model used the whole max_tokens budget thinking and returned no words. Try again.';
+    } else if (!content) {
+      content = (d.error && d.error.message) || 'Unexpected reply: ' + JSON.stringify(d).slice(0, 200);
+    }
+    thinking.textContent = content;
+    state.messages.push({ role: 'assistant', content: content });
+    applyReceipt(thinking, d.x402 || {});
+    $('railWarn').hidden = true;
+    persist();
+  } catch (e) {
+    thinking.textContent = handlePayError(e);
+    state.messages.pop();
+  }
+  state.busy = false;
+  $('sendBtn').disabled = false;
+}
+
+async function bind() {
+  var corpus = $('corpus').value;
+  if (!corpus.trim()) return;
+  $('bindStatus').textContent = 'binding…';
   try {
     var res = await OpenZooPay.paidFetch('/v1/hrr/bind', {
       method: 'POST',
-      body: JSON.stringify(payload)
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ corpus: corpus })
     }, payHooks());
-    var json = await res.json().catch(function () { return {}; });
-    if (!res.ok) {
-      throw new Error(json.error || json.message || ('HTTP ' + res.status));
+    var d = await res.json().catch(function () { return {}; });
+    if (d.context_id) {
+      state.ctx = d.context_id;
+      $('bindStatus').textContent = 'bound ' + (corpus.length / 1000).toFixed(0) + 'k chars';
+      setCtxChip();
+      $('drawer').classList.remove('open');
+      $('brainBtn').classList.remove('on');
+      persist();
+    } else {
+      $('bindStatus').textContent = handlePayError({ message: d.error && d.error.message ? d.error.message : (d.error || 'bind failed') });
     }
-    if (!json.context_id) {
-      throw new Error('Gateway did not return a context_id');
-    }
-    contextId = json.context_id;
-    $('context-id').value = contextId;
-    $('bind-result').textContent = 'Bound ' + (json.bound != null ? json.bound : '?') +
-      ' item(s). context_id=' + contextId + ' (sent as x-hrr-context on chat)';
-    setRail('ok', 'Context attached: <strong>' + contextId + '</strong>');
-  } catch (err) {
-    $('bind-result').textContent = handlePayError(err);
-  } finally {
-    $('bind-go').disabled = false;
+  } catch (e) {
+    $('bindStatus').textContent = handlePayError(e);
   }
 }
 
-function attachPasted() {
-  var id = $('context-id').value.trim();
-  if (!id) {
-    contextId = '';
-    $('bind-result').textContent = 'Cleared attached context.';
-    return;
-  }
-  if (/^ctx_[0-9A-HJKMNP-TV-Z]+$/i.test(id)) {
-    contextId = id;
-    namespace = '';
-    $('bind-result').textContent = 'Will send x-hrr-context: ' + id;
-  } else {
-    contextId = '';
-    namespace = id;
-    $('bind-result').textContent = 'Not a ctx_ id — will send x-openzoo-namespace instead. This is not a bind.';
+function closeDrawers() {
+  $('drawer').classList.remove('open');
+  $('statsDrawer').classList.remove('open');
+  $('brainBtn').classList.remove('on');
+  $('statsBtn').classList.remove('on');
+}
+
+function toggleDrawer(which) {
+  var open = which === 'bind' ? $('drawer') : $('statsDrawer');
+  var btn = which === 'bind' ? $('brainBtn') : $('statsBtn');
+  var willOpen = !open.classList.contains('open');
+  closeDrawers();
+  if (willOpen) {
+    open.classList.add('open');
+    btn.classList.add('on');
+    if (which === 'stats') loadStats();
   }
 }
 
 async function loadStats() {
-  $('stats-box').innerHTML = '<div class="help">Loading public /v1/stats…</div>';
+  $('statsBox').textContent = 'loading…';
   try {
-    var res = await fetch(OpenZooPay.gatewayUrl('/v1/stats'));
+    var res = await fetch(GATEWAY + '/v1/stats');
     var data = await res.json();
     if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
     var t = data.today || {};
-    $('stats-box').innerHTML =
+    function cell(k, v) {
+      return '<div class="stat"><div class="k">' + escapeHtml(k) + '</div><div class="v">' +
+        escapeHtml(v == null ? '—' : String(v)) + '</div></div>';
+    }
+    $('statsBox').innerHTML =
       '<div class="stats">' +
-        stat('calls today', t.calls) +
-        stat('paid', t.paid) +
-        stat('usd paid', t.usdPaid != null ? '$' + Number(t.usdPaid).toFixed(2) : '—') +
-        stat('conversion', t.conversionPct != null ? t.conversionPct + '%' : '—') +
-        stat('leCore save', t.lecoreSavingX != null ? t.lecoreSavingX + '×' : '—') +
-        stat('payers', t.distinctPayers) +
+        cell('calls today', t.calls) +
+        cell('paid', t.paid) +
+        cell('usd paid', t.usdPaid != null ? '$' + Number(t.usdPaid).toFixed(2) : '—') +
+        cell('leCore', t.lecoreSavingX != null ? t.lecoreSavingX + '×' : '—') +
       '</div>' +
-      '<div class="help" style="margin-top:8px">Public, CORS-enabled. No wallet required.</div>' +
       '<pre class="dump">' + escapeHtml(JSON.stringify({
         app: data.app, today: data.today, growth: data.growth, topModels: (data.topModels || []).slice(0, 5)
       }, null, 2)) + '</pre>';
-  } catch (err) {
-    $('stats-box').innerHTML = '<div class="help">' + escapeHtml(err.message || String(err)) + '</div>';
+  } catch (e) {
+    $('statsBox').textContent = e.message || String(e);
   }
-}
-
-function stat(k, v) {
-  return '<div class="stat"><div class="k">' + escapeHtml(String(k)) + '</div><div class="v">' +
-    escapeHtml(v == null ? '—' : String(v)) + '</div></div>';
 }
 
 function escapeHtml(s) {
@@ -252,27 +308,28 @@ function escapeHtml(s) {
   });
 }
 
-async function loadModels() {
-  var sel = $('model');
-  DEFAULT_MODELS.forEach(function (id) {
-    var o = document.createElement('option');
-    o.value = id; o.textContent = id;
-    sel.appendChild(o);
-  });
-  try {
-    var res = await fetch(OpenZooPay.gatewayUrl('/v1/models'));
-    var data = await res.json();
-    var ids = ((data && data.data) || []).map(function (m) { return m.id; });
-    ids.forEach(function (id) {
-      if (DEFAULT_MODELS.indexOf(id) >= 0) return;
-      var o = document.createElement('option');
-      o.value = id; o.textContent = id;
-      sel.appendChild(o);
-    });
-  } catch (_) { /* curated list is enough */ }
+function restore() {
+  state.messages.forEach(function (m) { bubble(m.content, m.role === 'user'); });
+  renderTicker();
+  if (state.model) $('model').value = state.model;
+  setCtxChip();
 }
 
-function onWallet(data) {
+function setWalletUi() {
+  var chip = $('walletChip');
+  if (wallet.address) {
+    chip.textContent = wallet.address.slice(0, 4) + '…' + wallet.address.slice(-4);
+    chip.classList.add('on');
+  } else {
+    chip.textContent = 'no wallet';
+    chip.classList.remove('on');
+  }
+}
+
+window.addEventListener('message', function (event) {
+  if (event.source !== window.parent) return;
+  var data = event.data;
+  if (!data || !data.type) return;
   if (data.type === 'wallet-connected') {
     wallet.address = data.address;
     wallet.method = data.method;
@@ -283,30 +340,35 @@ function onWallet(data) {
     wallet.method = null;
     setWalletUi();
   }
-}
-
-window.addEventListener('message', function (event) {
-  if (event.source !== window.parent) return;
-  if (event.data && event.data.type) onWallet(event.data);
 });
 window.parent.postMessage({ type: 'wallet-request-info' }, '*');
 
-$('tab-chat').onclick = function () { showTab('chat'); };
-$('tab-bind').onclick = function () { showTab('bind'); };
-$('tab-stats').onclick = function () { showTab('stats'); };
-$('send').onclick = sendChat;
-$('prompt').addEventListener('keydown', function (e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendChat();
-  }
+$('sendBtn').onclick = send;
+$('box').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
-$('bind-go').onclick = doBind;
-$('bind-attach').onclick = attachPasted;
+$('brainBtn').onclick = function () { toggleDrawer('bind'); };
+$('statsBtn').onclick = function () { toggleDrawer('stats'); };
+$('bindBtn').onclick = bind;
+$('newBtn').onclick = function () {
+  try { localStorage.removeItem(SKEY); } catch (_) {}
+  location.reload();
+};
 $('exit').onclick = function () {
   window.parent.postMessage({ type: 'wallet-disconnect' }, '*');
 };
+$('corpus').addEventListener('drop', function (e) {
+  e.preventDefault();
+  var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) {
+    var reader = new FileReader();
+    reader.onload = function () { $('corpus').value = reader.result; };
+    reader.readAsText(f);
+  }
+});
+$('corpus').addEventListener('dragover', function (e) { e.preventDefault(); });
+$('model').addEventListener('change', persist);
 
+restore();
 setWalletUi();
 loadModels();
-appendMsg('system', 'CHAT only. Bind attaches HRR context. No RUN / WRITE / READ / SERVE.');

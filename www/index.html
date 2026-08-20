@@ -9,12 +9,12 @@
   <title>OpenZoo</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; background: #080a08; }
+    html, body { width: 100%; height: 100%; background: #0A080D; }
     body {
       display: flex; flex-direction: column; align-items: center;
       justify-content: center; min-height: 100vh;
-      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-      color: #e8f0dc;
+      font-family: ui-rounded, "SF Pro Rounded", -apple-system, "Segoe UI", sans-serif;
+      color: #f4f1fb;
       padding: 28px 20px 56px;
       -webkit-user-select: none; user-select: none;
       -webkit-tap-highlight-color: transparent;
@@ -22,36 +22,25 @@
     }
 
     .logo {
-      width: 104px; height: 104px; border-radius: 22px;
+      width: 112px; height: 112px; border-radius: 56px;
       margin-bottom: 14px;
-      display: flex; align-items: center; justify-content: center;
-      background: radial-gradient(circle at 35% 30%, #1c2614, #0b100c 70%);
-      border: 1px solid rgba(198, 232, 90, 0.28);
-      box-shadow: 0 0 36px rgba(180, 220, 70, 0.12);
+      overflow: hidden;
+      border: 1px solid rgba(0, 255, 181, 0.28);
+      box-shadow: 0 0 36px rgba(224, 5, 246, 0.16);
+      background: #1C1628;
     }
-    .logo-mark {
-      width: 58px; height: 58px; border-radius: 50%;
-      border: 4px solid #c6e85a;
-      box-shadow: inset 0 0 0 7px #080a08, inset 0 0 0 11px rgba(198, 232, 90, 0.55);
-      position: relative;
-    }
-    .logo-mark:after {
-      content: "";
-      position: absolute; left: 50%; top: 50%;
-      width: 10px; height: 10px; margin: -5px 0 0 -5px;
-      border-radius: 50%; background: #c6e85a;
-    }
+    .logo img { width: 100%; height: 100%; display: block; }
     .title {
-      font-size: 26px; font-weight: 700; letter-spacing: 7px;
-      color: #f3fad8;
+      font-size: 26px; font-weight: 700; letter-spacing: 6px;
+      color: #f4f1fb;
     }
     .sub {
       margin-top: 8px; font-size: 11px; letter-spacing: 2px;
-      color: rgba(198, 232, 90, 0.72); text-transform: uppercase;
+      color: #00FFB5; text-transform: uppercase;
     }
     .divider {
       width: 56px; height: 1px; margin: 16px 0 18px;
-      background: linear-gradient(90deg, transparent, rgba(198,232,90,0.45), transparent);
+      background: linear-gradient(90deg, transparent, #00FFB5, transparent);
     }
 
     #picker {
@@ -70,10 +59,11 @@
     .btn:active { background: rgba(255,255,255,0.08); transform: scale(0.97); }
     .btn:disabled { opacity: 0.3; pointer-events: none; }
     .btn.primary {
-      border-color: rgba(198, 232, 90, 0.4);
-      background: linear-gradient(180deg, rgba(120, 160, 40, 0.16) 0%, rgba(40, 60, 16, 0.08) 100%);
+      border-color: rgba(0, 255, 181, 0.45);
+      background: linear-gradient(180deg, rgba(0, 255, 181, 0.16) 0%, rgba(28, 22, 40, 0.4) 100%);
+      color: #00FFB5;
     }
-    .btn.primary:active { background: rgba(198, 232, 90, 0.14); }
+    .btn.primary:active { background: rgba(0, 255, 181, 0.14); }
     .btn.danger {
       border-color: rgba(255,80,80,0.2);
       color: rgba(255,255,255,0.5); font-size: 12px; padding: 10px;
@@ -95,12 +85,12 @@
     }
     .lbl {
       font-size: 10px; letter-spacing: 3px;
-      color: rgba(198, 232, 90, 0.55); margin-bottom: 8px;
+      color: #00FFB5; margin-bottom: 8px;
     }
     .addr {
-      font-size: 12px; color: #d6ef8a; word-break: break-all;
-      padding: 12px 14px; background: rgba(198, 232, 90, 0.05);
-      border-radius: 8px; border: 1px solid rgba(198, 232, 90, 0.16);
+      font-size: 12px; color: #00FFB5; word-break: break-all;
+      padding: 12px 14px; background: #1C1628;
+      border-radius: 8px; border: 1px solid rgba(0, 255, 181, 0.2);
       line-height: 1.5;
     }
     .powered {
@@ -112,7 +102,7 @@
   </style>
 </head>
 <body>
-  <div class="logo" data-component="logo"><div class="logo-mark" aria-hidden="true"></div></div>
+  <div class="logo" data-component="logo"><img src="mark.png" alt="OpenZoo"></div>
   <div class="title" data-component="title">OPENZOO</div>
   <div class="sub" data-component="subtitle">Play Solana PSG1</div>
   <div class="divider" data-component="divider"></div>
@@ -125,7 +115,7 @@
     <button class="btn" onclick="launchApp()" data-testid="open-guest">
       OPEN WITHOUT WALLET
     </button>
-    <div class="hint">Stats work unpaid. Chat and paid bind need a wallet.</div>
+    <div class="hint">Stats and bind are free. Chat pays via x402 from the wallet.</div>
   </div>
 
   <div id="status" data-component="status"></div>

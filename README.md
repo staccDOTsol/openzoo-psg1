@@ -13,10 +13,10 @@ This tree is Android + EchOS. There is no iOS target and no iOS section.
 | Surface | Role |
 |---|---|
 | `www/index.html` | Wallet shell. Owns MWA. Never app logic. |
-| `www/app/` | OpenZoo UI (chat / bind / stats) loaded in an iframe |
-| `cordova-plugin-mwa` | Native MWA: `authorize`, `signMessage`, **`signTransaction`**, `signAndSendTransaction` |
+| `www/app/` | Bundled OpenZoo UI — desktop GUI trim: chat, bind drawer, session spend ticker, stats drawer |
+| `cordova-plugin-mwa` | Native MWA: `authorize`, `signMessage`, **`signTransaction`**, `signAndSendTransaction`. Wallet dialog identity is OpenZoo / https://openzoo.fun |
 
-Desktop RUN / WRITE / READ / SERVE are **not** ported and must not be claimed. The demo clicker in `www/game/` is unused.
+`https://www.openzoo.fun/chat` is a stall page and is **not** iframed. `GAME_URL` is `app/index.html`; CSP `frame-src` is `'self'`. Desktop RUN / WRITE / READ / SERVE are **not** ported and must not be claimed. The demo clicker in `www/game/` is unused.
 
 ```
 ┌────────────────────────────────────────────┐

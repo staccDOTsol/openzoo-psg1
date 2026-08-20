@@ -74,6 +74,13 @@ async function main() {
   assert(bind.json.object === 'hrr.bind' && /^ctx_/.test(bind.json.context_id), 'bind missing ctx_ id');
   console.log('bind ok —', bind.json.context_id, 'bound', bind.json.bound);
 
+  const models = await req('/v1/models');
+  assert(models.res.ok, '/v1/models should be public');
+  const kept = (models.json.data || []).filter((m) => m.id && !m.id.startsWith('~') && !m.id.includes(':batch'));
+  const dropped = (models.json.data || []).length - kept.length;
+  assert(kept.length > 0, 'expected usable models after ~ / :batch filter');
+  console.log('models ok — kept', kept.length, 'dropped', dropped);
+
   console.log('gateway contracts hold (CORS + 402 + pay/build + bind + stats). No settle attempted.');
 }
 
