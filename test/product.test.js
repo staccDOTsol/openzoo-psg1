@@ -60,6 +60,8 @@ test('layout is the grokui canvas, not a fly.dev form', () => {
   assert.match(css, /#sidebar/);
   assert.match(css, /#walletOverlay/);
   assert.match(css, /#b8f240/);
+  assert.match(html, /id="raceSel"/);
+  assert.match(html, /id="tierSel"/);
   assert.match(readme, /threads/i);
   assert.match(readme, /wTOKENx2/);
   assert.doesNotMatch(readme, /http:\/\/localhost:8402|127\.0\.0\.1:8402/);

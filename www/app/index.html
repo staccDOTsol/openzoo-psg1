@@ -66,6 +66,28 @@
       </button>
       <div id="chatHeaderId"></div>
       <div id="headerDials">
+        <select class="dial" id="tierSel" data-component="model-tier" aria-label="Model tier"
+                title="How much to spend per turn when racing">
+          <option value="cheap">cheap</option>
+          <option value="medium" selected>medium</option>
+          <option value="expensive">expensive</option>
+          <option value="grok4.6">grok4.6</option>
+        </select>
+        <select class="dial" id="raceSel" data-component="model-race" aria-label="Race models"
+                title="Ask N models from the band at once — first X real answers are judged. You pay for every entrant.">
+          <option value="0">1 model</option>
+          <optgroup label="first back wins">
+            <option value="2">race 2</option>
+            <option value="3">race 3</option>
+            <option value="4">race 4</option>
+          </optgroup>
+          <optgroup label="judge the first k back">
+            <option value="2 3">best 2 of 3</option>
+            <option value="2 4" selected>best 2 of 4</option>
+            <option value="3 4">best 3 of 4</option>
+            <option value="4 4">best 4 of 4</option>
+          </optgroup>
+        </select>
         <input id="model" list="modelList" class="dial model" placeholder="model" data-component="model-picker">
         <datalist id="modelList"></datalist>
         <button class="dial" id="walletBtn" data-component="wallet-open" title="Wallet">wallet</button>
@@ -118,6 +140,7 @@
   <script src="wrap.js"></script>
   <script src="pay.js"></script>
   <script src="spill.js"></script>
+  <script src="race.js"></script>
   <script src="copy.js"></script>
   <script src="app.js"></script>
 </body>

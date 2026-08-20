@@ -13,9 +13,19 @@ function uid() {
   return 't-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+function hydrateThread(t) {
+  if (!t || typeof t !== 'object') return t;
+  t.tier = OpenZooRace.normalizeTier(t.tier);
+  if (t.race == null && t.raceNeed == null) {
+    t.race = OpenZooRace.DEFAULT_N;
+    t.raceNeed = OpenZooRace.DEFAULT_NEED;
+  }
+  return t;
+}
+
 var persisted = loadStore();
 var threads = Array.isArray(persisted.threads) && persisted.threads.length
-  ? persisted.threads
+  ? persisted.threads.map(hydrateThread)
   : [newThread('openzoo')];
 var activeId = persisted.activeId && threads.some(function (t) { return t.id === persisted.activeId; })
   ? persisted.activeId
@@ -24,6 +34,8 @@ var wallet = { address: null, method: null };
 var pendingFiles = [];
 var busy = false;
 var sidebarOpen = false;
+var catalogIds = [];
+var payQueue = OpenZooRace.createPayQueue();
 
 function newThread(name) {
   return {
@@ -39,7 +51,10 @@ function newThread(name) {
     spent: 0,
     direct: 0,
     calls: 0,
-    model: ''
+    model: '',
+    tier: 'medium',
+    race: OpenZooRace.DEFAULT_N,
+    raceNeed: OpenZooRace.DEFAULT_NEED
   };
 }
 
@@ -247,6 +262,33 @@ function renderHeader() {
   id.querySelector('.hname > div').textContent = t.name;
   if (t.model && !$('model').value) $('model').value = t.model;
   else if (t.model) $('model').value = t.model;
+  syncDials(t);
+}
+
+function racePlanOf(t) {
+  t = t || active();
+  if (t.race == null && t.raceNeed == null) return OpenZooRace.defaultDial();
+  return OpenZooRace.parseDial(OpenZooRace.formatDial(t.race, t.raceNeed));
+}
+
+function syncDials(t) {
+  t = t || active();
+  var tierSel = $('tierSel');
+  var raceSel = $('raceSel');
+  if (!tierSel || !raceSel) return;
+  t.tier = OpenZooRace.normalizeTier(t.tier);
+  var plan = racePlanOf(t);
+  t.race = plan.n;
+  t.raceNeed = plan.need;
+  tierSel.value = t.tier;
+  raceSel.value = OpenZooRace.formatDial(plan);
+  var racing = plan.n >= 2;
+  tierSel.className = 'dial tier' + (racing && (t.tier === 'expensive' || t.tier === 'grok4.6') ? ' hot' : '');
+  raceSel.className = 'dial race' + (racing ? ' hot' : '');
+  $('model').classList.toggle('pinned', racing);
+  $('model').title = racing
+    ? 'Racing the ' + t.tier + ' band — the single model picker is ignored until race is off.'
+    : 'Pin one model (race off)';
 }
 
 function sessionTotals() {
@@ -347,6 +389,7 @@ async function loadModels() {
     var d = await r.json();
     var models = (d.data || []).filter(function (m) { return keepModel(m.id); });
     models.sort(function (a, b) { return a.id.localeCompare(b.id); });
+    catalogIds = models.map(function (m) { return m.id; });
     var dl = $('modelList');
     dl.innerHTML = '';
     models.forEach(function (m) {
@@ -439,6 +482,77 @@ async function rememberHistory(t) {
   }
 }
 
+function noteReceipt(t, x, billedBits) {
+  if (!x) return;
+  OpenZooSpill.applyReceipt(t, x);
+  if (billedBits && typeof x.billedUsd === 'number') {
+    billedBits.push('$' + x.billedUsd.toFixed(4));
+  }
+}
+
+async function racePaidChat(t, messages, contextId, model, tokens, signal, onDelta, billedBits) {
+  var headers = { 'Content-Type': 'application/json' };
+  if (contextId) headers['x-hrr-context'] = contextId;
+  var res = await payQueue(function () {
+    return OpenZooPay.paidFetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({
+        model: model,
+        messages: messages,
+        max_tokens: tokens || maxTokens(model),
+        stream: true
+      }),
+      signal: signal
+    }, payHooks({ contextId: contextId }));
+  });
+  if (res.status === 402) throw new Error('payment failed');
+  if (!res.ok) {
+    var errBody = await res.json().catch(function () { return {}; });
+    var msg = (errBody.error && errBody.error.message) || errBody.error || ('HTTP ' + res.status);
+    throw new Error(typeof msg === 'string' ? msg : ('HTTP ' + res.status));
+  }
+  var got = await OpenZooPay.readSseOrJson(res, function (_full, delta) {
+    if (delta) onDelta(delta);
+  });
+  if (got.json) noteReceipt(t, got.json.x402, billedBits);
+  if (!got.stream && got.text) onDelta(got.text);
+  return got.text;
+}
+
+async function raceStream(t, messages, onDelta, contextId, model, tokens, signal, billedBits) {
+  return racePaidChat(t, messages, contextId, model, tokens, signal, onDelta, billedBits);
+}
+
+async function raceJudgeCall(t, prompt, maxTok, billedBits) {
+  var judge = OpenZooRace.judgeModel(catalogIds);
+  var res = await payQueue(function () {
+    return OpenZooPay.paidFetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: judge,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: maxTok || 24
+      })
+    }, payHooks());
+  });
+  var d = await res.json().catch(function () { return {}; });
+  if (!res.ok) throw new Error((d.error && d.error.message) || ('HTTP ' + res.status));
+  noteReceipt(t, d.x402, billedBits);
+  return (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || '';
+}
+
+async function raceClassify(t, messages, cand, billedBits) {
+  var verdict = await raceJudgeCall(t, OpenZooRace.classifyPrompt(messages, cand), 24, billedBits);
+  return OpenZooRace.parseClassifyScore(verdict);
+}
+
+async function racePairwise(t, messages, tied, billedBits) {
+  var verdict = await raceJudgeCall(t, OpenZooRace.pairwisePrompt(messages, tied), 8, billedBits);
+  return OpenZooRace.pickTiedLetter(verdict, tied);
+}
+
 async function send() {
   var text = $('inp').value.trim();
   if ((!text && !pendingFiles.length) || busy) return;
@@ -448,6 +562,10 @@ async function send() {
   }
   var t = active();
   t.model = $('model').value || t.model;
+  t.tier = OpenZooRace.normalizeTier($('tierSel').value);
+  var dial = OpenZooRace.parseDial($('raceSel').value);
+  t.race = dial.n;
+  t.raceNeed = dial.need;
   busy = true;
   $('inp').value = '';
   syncSend();
@@ -474,39 +592,72 @@ async function send() {
   try {
     await rememberHistory(t);
     var plan = OpenZooSpill.outgoingChat(t.messages, t.memory);
-    var headers = { 'Content-Type': 'application/json' };
-    if (plan.contextId) headers['x-hrr-context'] = plan.contextId;
-    var res = await OpenZooPay.paidFetch('/v1/chat/completions', {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify({
-        model: t.model,
-        messages: plan.messages,
-        max_tokens: maxTokens(t.model)
-      })
-    }, payHooks({ contextId: plan.contextId }));
-    var d = await res.json().catch(function () { return {}; });
-    if (res.status === 402) throw new Error('Still waiting on payment. Approve in Jupiter Wallet and retry.');
-    if (!res.ok) throw new Error((d.error && d.error.message) || d.error || ('HTTP ' + res.status));
-    var ch = d.choices && d.choices[0];
-    var content = (ch && ch.message && ch.message.content) || '';
-    if (!content && ch && ch.finish_reason === 'length') {
-      content = 'The model used the whole thinking budget and said nothing. Try again.';
-    } else if (!content) {
-      content = (d.error && d.error.message) || 'Unexpected reply.';
+    var racePlan = racePlanOf(t);
+    var content;
+    var billedBits = [];
+    if (racePlan.n >= 2) {
+      setStatus(OpenZooRace.formatRaceStatus(0, racePlan.need));
+      var painted = '';
+      content = await OpenZooRace.brainRace(
+        plan.messages,
+        function (chunk, meta) {
+          if (!chunk) return;
+          if (meta && meta.replace) painted = String(chunk);
+          else painted += String(chunk);
+          thinking.textContent = painted || '…';
+        },
+        plan.contextId,
+        OpenZooRace.tierModels(t.tier, racePlan.n, true, catalogIds),
+        racePlan.need,
+        maxTokens(t.model),
+        setStatus,
+        {
+          stream: function (messages, onDelta, contextId, model, tokens, _r, _k, _st, signal) {
+            return raceStream(t, messages, onDelta, contextId, model, tokens, signal, billedBits);
+          },
+          classify: function (messages, cand) {
+            return raceClassify(t, messages, cand, billedBits);
+          },
+          pairwise: function (messages, tied) {
+            return racePairwise(t, messages, tied, billedBits);
+          }
+        }
+      );
+    } else {
+      var headers = { 'Content-Type': 'application/json' };
+      if (plan.contextId) headers['x-hrr-context'] = plan.contextId;
+      var res = await OpenZooPay.paidFetch('/v1/chat/completions', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+          model: t.model,
+          messages: plan.messages,
+          max_tokens: maxTokens(t.model)
+        })
+      }, payHooks({ contextId: plan.contextId }));
+      var d = await res.json().catch(function () { return {}; });
+      if (res.status === 402) throw new Error('Still waiting on payment. Approve in Jupiter Wallet and retry.');
+      if (!res.ok) throw new Error((d.error && d.error.message) || d.error || ('HTTP ' + res.status));
+      var ch = d.choices && d.choices[0];
+      content = (ch && ch.message && ch.message.content) || '';
+      if (!content && ch && ch.finish_reason === 'length') {
+        content = 'The model used the whole thinking budget and said nothing. Try again.';
+      } else if (!content) {
+        content = (d.error && d.error.message) || 'Unexpected reply.';
+      }
+      OpenZooSpill.applyReceipt(t, d.x402 || {});
+      var x = d.x402 || {};
+      if (typeof x.billedUsd === 'number') billedBits.push('$' + x.billedUsd.toFixed(4));
+      if (x.lecore && x.lecore.engaged) billedBits.push((x.lecore.recalled != null ? x.lecore.recalled : '?') + ' slices');
     }
+    if (!content) throw new Error(OpenZooRace.RACE_EVERY_FAILED);
     thinking.textContent = content;
     thinking.parentElement.classList.remove('pending');
     t.messages.push({ role: 'assistant', content: content });
-    var x = d.x402 || {};
-    OpenZooSpill.applyReceipt(t, x);
-    var bits = [];
-    if (typeof x.billedUsd === 'number') bits.push('$' + x.billedUsd.toFixed(4));
-    if (x.lecore && x.lecore.engaged) bits.push((x.lecore.recalled != null ? x.lecore.recalled : '?') + ' slices');
-    if (bits.length) {
+    if (billedBits.length) {
       var meta = document.createElement('div');
       meta.className = 'meta';
-      meta.textContent = bits.join(' · ');
+      meta.textContent = billedBits.join(' · ');
       thinking.insertAdjacentElement('afterend', meta);
     }
     persist();
@@ -620,6 +771,20 @@ $('inp').addEventListener('keydown', function (e) {
 $('model').addEventListener('change', function () {
   active().model = $('model').value;
   persist();
+});
+$('tierSel').addEventListener('change', function () {
+  var t = active();
+  t.tier = OpenZooRace.normalizeTier($('tierSel').value);
+  persist();
+  syncDials(t);
+});
+$('raceSel').addEventListener('change', function () {
+  var t = active();
+  var plan = OpenZooRace.parseDial($('raceSel').value);
+  t.race = plan.n;
+  t.raceNeed = plan.need;
+  persist();
+  syncDials(t);
 });
 $('search').addEventListener('input', renderThreads);
 $('newMsgBtn').onclick = function () {

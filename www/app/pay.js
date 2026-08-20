@@ -316,6 +316,7 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
         return await fetch(url, init);
       } catch (e) {
         last = e;
+        if (init && init.signal && init.signal.aborted) throw e;
         if (!isTransientNetwork(e)) {
           var hard = new Error(humanizePayError(e));
           hard.cause = e;
@@ -790,6 +791,7 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
       headers: headers
     };
     if (init.body != null) requestInit.body = init.body;
+    if (init.signal) requestInit.signal = init.signal;
 
     if (hooks.onStatus) hooks.onStatus('Talking to the zoo…');
     var res = await gatewayFetch(gatewayUrl(path), requestInit, hooks);

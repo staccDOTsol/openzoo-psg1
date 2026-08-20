@@ -63,7 +63,9 @@ body {
   border-radius: 999px; padding: 4px 8px; cursor: pointer; -webkit-appearance: none; appearance: none;
 }
 .dial:hover { color: #ececec; border-color: #3a3a3c; }
+.dial.hot { color: #f28c4d; border-color: #f28c4d; }
 .dial.model { width: 140px; min-width: 90px; }
+.dial.tier, .dial.race { max-width: 118px; }
 .send-pill {
   background: #b8f240; color: #0b0b0d; border: 0; border-radius: 999px;
   padding: 6px 14px; font-weight: 700; cursor: pointer;
