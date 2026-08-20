@@ -272,6 +272,7 @@ var OpenZooWrap = (function (OpenZooCodec) {
         id: id,
         transaction: txB64
       }, '*');
+      window.parent.postMessage({ type: 'wallet-claim-sign', id: id }, '*');
     });
   }
 

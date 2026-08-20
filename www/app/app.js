@@ -58,12 +58,99 @@ function persist() {
   } catch (_) {}
 }
 
+function copyText(text, rect) {
+  var value = String(text || '');
+  if (!value) return Promise.resolve(false);
+  if (window.OpenZooCopy && OpenZooCopy.copyAddress) {
+    return OpenZooCopy.copyAddress(value, rect);
+  }
+  if (window.OpenZooCopy && OpenZooCopy.copyText) {
+    return OpenZooCopy.copyText(value).then(function (ok) {
+      if (ok) toast('copied', rect);
+      return ok;
+    });
+  }
+  toast('copied', rect);
+  return Promise.resolve(true);
+}
+
+function showPayPrompt(opts) {
+  opts = opts || {};
+  return new Promise(function (resolve) {
+    var overlay = $('payPromptOverlay');
+    var title = $('payPromptTitle');
+    var body = $('payPromptBody');
+    var addrRow = $('payPromptAddrRow');
+    var addr = $('payPromptAddr');
+    var okBtn = $('payPromptOk');
+    var cancelBtn = $('payPromptCancel');
+    title.textContent = opts.title || '';
+    body.textContent = opts.body || '';
+    if (opts.address) {
+      addrRow.hidden = false;
+      addr.textContent = opts.address;
+      addrRow.title = 'Tap to copy';
+      addrRow.onclick = function (e) {
+        copyText(opts.address, e.currentTarget.getBoundingClientRect());
+      };
+    } else {
+      addrRow.hidden = true;
+      addr.textContent = '';
+      addrRow.onclick = null;
+    }
+    okBtn.textContent = opts.ok || 'ok';
+    cancelBtn.textContent = opts.cancel || 'not now';
+    function finish(val) {
+      overlay.classList.remove('show');
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      overlay.onclick = null;
+      resolve(val);
+    }
+    okBtn.onclick = function () { finish(true); };
+    cancelBtn.onclick = function () { finish(false); };
+    overlay.onclick = function (e) {
+      if (e.target === overlay) finish(false);
+    };
+    overlay.classList.add('show');
+  });
+}
+
+function promptWrap(info) {
+  var copy = (info && info.copy) || OpenZooPay.wrapPromptCopy(info && info.symbol);
+  return showPayPrompt({
+    title: copy.title,
+    body: copy.body,
+    ok: copy.ok,
+    cancel: copy.cancel
+  });
+}
+
+function promptFunds(info) {
+  var copy = info && info.kind === 'sol'
+    ? OpenZooPay.shortSolCopy()
+    : OpenZooPay.shortTokensCopy(info && info.tokens);
+  var address = (info && info.address) || wallet.address;
+  return showPayPrompt({
+    title: copy.title,
+    body: copy.body,
+    address: address,
+    ok: 'copied',
+    cancel: 'close'
+  }).then(function (ok) {
+    if (ok && address) return copyText(address);
+    return false;
+  });
+}
+
 function payHooks() {
   var t = active();
   return {
     payer: wallet.address,
     contextId: t.memory || undefined,
-    onStatus: setStatus
+    onStatus: setStatus,
+    confirmWrap: promptWrap,
+    needFunds: promptFunds
   };
 }
 
@@ -415,11 +502,12 @@ async function send() {
     setStatus('');
     rememberHistory(t);
   } catch (e) {
-    thinking.textContent = OpenZooPay.humanizePayError(e);
+    var shown = OpenZooPay.humanizePayError(e);
+    thinking.textContent = shown;
     thinking.parentElement.classList.remove('pending');
-    t.messages.pop();
+    if (!e || e.name !== 'NeedFundsError') t.messages.pop();
     persist();
-    setStatus(OpenZooPay.humanizePayError(e), 'warn');
+    setStatus(shown, 'warn');
   }
   busy = false;
 }

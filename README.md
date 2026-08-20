@@ -52,8 +52,10 @@ Bridge messages:
 2. `POST https://x402-tokens.fly.dev/v1/chat/completions` (any `Authorization`; payment is the auth).
 3. On **402**: keep Solana `exact` rows. Hide drained mint `Bo7xBF7SY8EyUBPUxRP66SFafxoPf2n5uqiLjbxEebx9`. Mint `FXYkwMtfKpA174rp8ixVeiGs5TYGaBsYRrHE3KrR449B` is **wTOKENx2**, never wTOKENx.
 4. If the wallet already holds a live twin, pay that rail.
-5. Else ez-mode wrap: detect TOKEN (`EVULoNF4…`), USDC, LEOS, or a live twin, and wrap via wrap-nav `FrSERTNCPvTtaDS9AvQp9u1nYGzXDb3kC9MdL8Xxn2NE` using directory `acquire`. wTOKENx2 is **nine accounts**, bump **254** (see `staccDOTsol/openzoo` `lib/wrap.js`). Wrap **may send**.
+5. Else ez-mode wrap: `pickLargestUseful` gates on **held > 0** / `depositForShares`. It must not compare TOKEN raw to the twin's `maxAmountRequired` — ~$10 TOKEN (`EVULoNF4…`) is enough to wrap into wTOKENx2. Prompt: *You have TOKEN. Wrap enough to send this?* Then wrap, confirm, pay. Short SOL or short tokens: say which to send, show a **copyable address**, toast on tap. Persist the 402 across MWA backgrounding. Wrap via wrap-nav `FrSERTNCPvTtaDS9AvQp9u1nYGzXDb3kC9MdL8Xxn2NE` using directory `acquire`. wTOKENx2 is **nine accounts**, bump **254**. Wrap **may send**.
 6. `POST /v1/pay/build` → `MWA.signTransaction` → retry with `X-PAYMENT`. Partial-sign only. Do not rebuild the payment tx.
+
+The wallet address is tap-to-copy. Errors stay human — never a raw "Load failed".
 
 The UI never shows context ids, bind routes, bind hashes, or wrap-twin homework. Wallet copy talks about USDC / TOKEN / LEOS.
 

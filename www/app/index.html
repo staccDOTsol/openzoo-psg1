@@ -32,6 +32,21 @@
     </div>
   </div>
 
+  <div id="payPromptOverlay" data-component="pay-prompt-modal">
+    <div id="payPromptBox">
+      <h3 id="payPromptTitle">Payment</h3>
+      <p class="wsub" id="payPromptBody"></p>
+      <div id="payPromptAddrRow" class="wrow copyable" hidden>
+        <div class="wlab">Address</div>
+        <div class="waddr" id="payPromptAddr" title="Tap to copy"></div>
+      </div>
+      <div class="pay-prompt-actions">
+        <button class="dial" id="payPromptCancel" type="button">not now</button>
+        <button class="send-pill" id="payPromptOk" type="button">wrap</button>
+      </div>
+    </div>
+  </div>
+
   <div id="textAttachOverlay" data-component="text-attach-modal">
     <div id="textAttachBox">
       <h3>Add notes</h3>
