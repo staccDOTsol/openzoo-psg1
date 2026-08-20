@@ -82,7 +82,18 @@ Release:
 
 Check the toolchain with `npm run requirements` (`cordova requirements android`).
 
-This cloud workspace typically has JDK but **not** a full Android SDK, so it cannot always emit an APK. The source is complete: the commands above work on a Mac (or Linux) with Android SDK installed. Missing pieces without an SDK: `ANDROID_HOME` / `ANDROID_SDK_ROOT`, platform packages, and licenses.
+This cloud workspace produced a debug APK after installing Android SDK platform 35, build-tools 35.0.0, and Gradle 8.13. The APK is **not committed** (`platforms/` is gitignored). On a Mac/Linux box with those tools:
+
+```bash
+export ANDROID_HOME=/path/to/android-sdk
+export JAVA_HOME=/path/to/jdk-17-or-21
+export PATH="$ANDROID_HOME/platform-tools:$PATH:/path/to/gradle-8.13/bin"
+npm install
+npx cordova prepare android
+npm run build
+```
+
+Missing pieces if `cordova requirements android` fails: `ANDROID_HOME`, `platforms;android-35`, `build-tools;35.0.0`, and Gradle **8.13** (matches `cordova-android` 14).
 
 Optional live check (no wallet, no settle): `npm run verify:gateway` — confirms CORS, Solana-vs-EVM rail split, `/v1/pay/build` envelope, `/v1/hrr/bind`, and `/v1/stats`.
 
