@@ -39,6 +39,7 @@ test('app never surfaces bind plumbing or drained mint to the user', () => {
   assert.doesNotMatch(app, /Bo7xBF7SY8EyUBPUxRP66SFafxoPf2n5uqiLjbxEebx9/);
   assert.doesNotMatch(app, /localhost:8402/);
   assert.doesNotMatch(app, /['"]Load failed['"]/);
+  assert.doesNotMatch(app, /SPAWN|worktree/i);
 });
 
 test('shell keeps MWA, adds wrap send, and does not bounce :8402', () => {
@@ -76,6 +77,8 @@ test('x402 prompts for wrap / short SOL / short tokens and copies the address', 
   assert.match(app, /copyText|OpenZooCopy/);
   assert.match(app, /Tap to copy/);
   assert.match(app, /onAppResume|resumePendingPay/);
+  assert.match(app, /outgoingChat|plan\.messages/);
+  assert.doesNotMatch(app, /t\.saved \+= x\.savesVsDirect/);
   assert.doesNotMatch(app, /['"]Load failed['"]/);
   assert.doesNotMatch(html, /Load failed/);
   assert.doesNotMatch(pay, /localhost:8402/);
