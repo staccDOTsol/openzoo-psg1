@@ -68,6 +68,137 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
     return bytesToB64(bytes);
   }
 
+  var PENDING_KEY = 'openzoo.psg1.pending402';
+  var PENDING_TTL_MS = 15 * 60 * 1000;
+  var resumeWaiters = [];
+  var appForeground = true;
+  var memoryStore = {};
+
+  function storeGet(key) {
+    try {
+      if (typeof sessionStorage !== 'undefined') return sessionStorage.getItem(key);
+    } catch (_) {}
+    return Object.prototype.hasOwnProperty.call(memoryStore, key) ? memoryStore[key] : null;
+  }
+
+  function storeSet(key, value) {
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem(key, value);
+        return;
+      }
+    } catch (_) {}
+    memoryStore[key] = value;
+  }
+
+  function storeDel(key) {
+    try {
+      if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(key);
+    } catch (_) {}
+    delete memoryStore[key];
+  }
+
+  function persistPending402(state) {
+    if (!state) {
+      storeDel(PENDING_KEY);
+      return null;
+    }
+    var row = {
+      path: state.path || '',
+      method: state.method || 'POST',
+      headers: state.headers || {},
+      body: state.body == null ? null : state.body,
+      quote: state.quote || null,
+      payer: state.payer || '',
+      contextId: state.contextId || null,
+      namespace: state.namespace || null,
+      savedAt: Date.now()
+    };
+    try { storeSet(PENDING_KEY, JSON.stringify(row)); } catch (_) {}
+    return row;
+  }
+
+  function loadPending402() {
+    var raw = storeGet(PENDING_KEY);
+    if (!raw) return null;
+    try {
+      var row = JSON.parse(raw);
+      if (!row || !row.quote) return null;
+      if (row.savedAt && (Date.now() - row.savedAt) > PENDING_TTL_MS) {
+        storeDel(PENDING_KEY);
+        return null;
+      }
+      return row;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function clearPending402() {
+    storeDel(PENDING_KEY);
+  }
+
+  function notifyPause() {
+    appForeground = false;
+  }
+
+  function notifyResume() {
+    appForeground = true;
+    var waiters = resumeWaiters.slice();
+    resumeWaiters = [];
+    var i;
+    for (i = 0; i < waiters.length; i++) {
+      try { waiters[i](); } catch (_) {}
+    }
+  }
+
+  function waitForResumeOr(ms) {
+    return new Promise(function (resolve) {
+      var done = false;
+      function finish() {
+        if (done) return;
+        done = true;
+        resolve(appForeground);
+      }
+      resumeWaiters.push(finish);
+      setTimeout(finish, typeof ms === 'number' ? ms : 2000);
+    });
+  }
+
+  function errorText(err) {
+    if (err == null) return '';
+    if (typeof err === 'string') return err;
+    if (err.message) return String(err.message);
+    if (err.name && err.name !== 'Error') return String(err.name);
+    return String(err);
+  }
+
+  function isTransientNetwork(err) {
+    var msg = errorText(err);
+    var low = msg.toLowerCase();
+    var name = err && err.name ? String(err.name).toLowerCase() : '';
+    if (name === 'typeerror' || name === 'networkerror' || name === 'aborterror') return true;
+    return (
+      low.indexOf('load failed') >= 0 ||
+      low.indexOf('failed to fetch') >= 0 ||
+      low.indexOf('networkerror') >= 0 ||
+      low.indexOf('network request failed') >= 0 ||
+      low.indexOf('the internet connection appears to be offline') >= 0 ||
+      low.indexOf('failed to load') >= 0 ||
+      low.indexOf('err_internet') >= 0 ||
+      low.indexOf('err_connection') >= 0 ||
+      low.indexOf('err_name_not_resolved') >= 0 ||
+      low.indexOf('net::') >= 0 ||
+      low.indexOf('aborted') >= 0 ||
+      low.indexOf('abort') >= 0 && low.indexOf('user') < 0 ||
+      /\btypeerror\b/.test(low)
+    );
+  }
+
+  function humanizeNetworkError() {
+    return 'Connection dropped while talking to the zoo. Return to OpenZoo and we will retry — approve in Jupiter Wallet if it is still open.';
+  }
+
   function UnpayableError(rails, balances, message) {
     this.name = 'UnpayableError';
     this.code = 'UNPAYABLE';
@@ -79,7 +210,9 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
   UnpayableError.prototype = Object.create(Error.prototype);
 
   function humanizePayError(err) {
-    var msg = (err && err.message) ? String(err.message) : String(err || '');
+    if (err && err.code === 'UNPAYABLE' && err.message) return String(err.message);
+    var msg = errorText(err);
+    if (isTransientNetwork(err) || isTransientNetwork(msg)) return humanizeNetworkError();
     var low = msg.toLowerCase();
     if (
       low.indexOf('simulat') >= 0 ||
@@ -92,7 +225,37 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
     if (low.indexOf('sol') >= 0 && (low.indexOf('fee') >= 0 || low.indexOf('lamport') >= 0 || low.indexOf('rent') >= 0)) {
       return 'Need a little SOL in this wallet to top up.';
     }
+    if (
+      /^typeerror\b/.test(low) ||
+      low.indexOf('load failed') >= 0 ||
+      low === 'undefined' ||
+      low === 'error' ||
+      !msg
+    ) {
+      return humanizeNetworkError();
+    }
     return msg;
+  }
+
+  async function gatewayFetch(url, init, hooks) {
+    hooks = hooks || {};
+    var last = null;
+    var i;
+    for (i = 0; i < 4; i++) {
+      try {
+        return await fetch(url, init);
+      } catch (e) {
+        last = e;
+        if (!isTransientNetwork(e)) {
+          var hard = new Error(humanizePayError(e));
+          hard.cause = e;
+          throw hard;
+        }
+        if (hooks.onStatus) hooks.onStatus('Waiting to retry…');
+        await waitForResumeOr(appForeground ? 800 : 4000);
+      }
+    }
+    throw new Error(humanizePayError(last));
   }
 
   async function rpc(method, params) {
@@ -199,12 +362,12 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
     });
   }
 
-  async function buildPayment(accept, payer) {
-    var res = await fetch(gatewayUrl('/v1/pay/build'), {
+  async function buildPayment(accept, payer, hooks) {
+    var res = await gatewayFetch(gatewayUrl('/v1/pay/build'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ accept: accept, payer: payer })
-    });
+    }, hooks);
     var body = await res.json().catch(function () { return {}; });
     if (!res.ok) {
       throw new Error(body.error || ('pay/build failed HTTP ' + res.status));
@@ -336,7 +499,7 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
       }
     }
     if (hooks.onStatus) hooks.onStatus('Approve in Jupiter Wallet…');
-    var built = await buildPayment(pick.chosen, hooks.payer);
+    var built = await buildPayment(pick.chosen, hooks.payer, hooks);
     var signed = await signViaBridge(built.transaction);
     if (!signed) throw new Error('Wallet returned an empty signature');
     return {
@@ -372,17 +535,83 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
     if (init.body != null) requestInit.body = init.body;
 
     if (hooks.onStatus) hooks.onStatus('Talking to the zoo…');
-    var res = await fetch(gatewayUrl(path), requestInit);
+    var res = await gatewayFetch(gatewayUrl(path), requestInit, hooks);
     if (res.status === 402) {
       var quote = await res.json().catch(function () { return {}; });
-      var paid = await settle402(quote, hooks);
+      persistPending402({
+        path: path,
+        method: requestInit.method,
+        headers: headers,
+        body: init.body == null ? null : init.body,
+        quote: quote,
+        payer: hooks.payer,
+        contextId: hooks.contextId,
+        namespace: hooks.namespace
+      });
+      var paid;
+      try {
+        paid = await settle402(quote, hooks);
+      } catch (e) {
+        if (isTransientNetwork(e)) {
+          if (hooks.onStatus) hooks.onStatus('Retrying payment…');
+          await waitForResumeOr(appForeground ? 600 : 4000);
+          paid = await settle402(quote, hooks);
+        } else {
+          throw e;
+        }
+      }
       headers = mergeHeaders(headers, { 'X-PAYMENT': paid.header });
       requestInit.headers = headers;
       if (hooks.onStatus) hooks.onStatus('Retrying…');
-      res = await fetch(gatewayUrl(path), requestInit);
+      try {
+        res = await gatewayFetch(gatewayUrl(path), requestInit, hooks);
+      } catch (e) {
+        throw new Error(humanizePayError(e));
+      }
       res._openzooRail = paid.rail;
+      if (res.status !== 402) clearPending402();
     }
     return res;
+  }
+
+  async function resumePendingPay(hooks) {
+    hooks = hooks || {};
+    var pending = loadPending402();
+    if (!pending || !pending.quote) return null;
+    if (hooks.payer && !pending.payer) pending.payer = hooks.payer;
+    var settleHooks = {
+      payer: pending.payer || hooks.payer,
+      contextId: pending.contextId || hooks.contextId,
+      namespace: pending.namespace || hooks.namespace,
+      onStatus: hooks.onStatus,
+      onRail: hooks.onRail
+    };
+    if (hooks.onStatus) hooks.onStatus('Retrying payment…');
+    var paid = await settle402(pending.quote, settleHooks);
+    var headers = mergeHeaders({
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer openzoo-psg1'
+    }, pending.headers || {});
+    if (settleHooks.contextId) headers['x-hrr-context'] = settleHooks.contextId;
+    if (settleHooks.namespace) headers['x-openzoo-namespace'] = settleHooks.namespace;
+    headers['X-PAYMENT'] = paid.header;
+    var requestInit = { method: pending.method || 'POST', headers: headers };
+    if (pending.body != null) requestInit.body = pending.body;
+    var res = await gatewayFetch(gatewayUrl(pending.path), requestInit, hooks);
+    res._openzooRail = paid.rail;
+    if (res.status !== 402) clearPending402();
+    return res;
+  }
+
+  function onAppResume(hooks) {
+    notifyResume();
+    if (!hooks || !hooks.autoRetry) return Promise.resolve(null);
+    var pending = loadPending402();
+    if (!pending) return Promise.resolve(null);
+    return resumePendingPay(hooks).catch(function (e) {
+      if (hooks.onStatus) hooks.onStatus(humanizePayError(e), 'warn');
+      return null;
+    });
   }
 
   async function readSseOrJson(res, onDelta) {
@@ -460,11 +689,20 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
     encodeXPayment: encodeXPayment,
     UnpayableError: UnpayableError,
     humanizePayError: humanizePayError,
+    isTransientNetwork: isTransientNetwork,
+    persistPending402: persistPending402,
+    loadPending402: loadPending402,
+    clearPending402: clearPending402,
+    notifyPause: notifyPause,
+    notifyResume: notifyResume,
+    onAppResume: onAppResume,
+    resumePendingPay: resumePendingPay,
     fetchBalances: fetchBalances,
     pickPayableRail: pickPayableRail,
     pickWrappableRail: pickWrappableRail,
     paidFetch: paidFetch,
     settle402: settle402,
+    buildPayment: buildPayment,
     readSseOrJson: readSseOrJson,
     silentBind: silentBind
   };

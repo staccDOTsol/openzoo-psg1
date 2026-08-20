@@ -4,7 +4,11 @@ OpenZoo on the [Play Solana](https://playsolana.com) Gen1 handheld: the **grokui
 
 Widget / package id: **`fun.openzoo.psg1`**.
 
-The phone talks to `https://x402-tokens.fly.dev` directly. CORS is live. There is no local proxy hop.
+The phone talks to `https://x402-tokens.fly.dev` directly. CORS is live. There is no local proxy hop. `connect-src` allows that gateway, `https://x402.accrue.fund` (live `/supported`), and `https://api.mainnet-beta.solana.com` (the RPC wrap/balances actually call).
+
+Wallet addresses are selectable. Tap an address (or select text) to copy it; a **copied** toast confirms. Copy uses the Android clipboard via the Cordova MWA plugin — `navigator.clipboard` is not a secure-context API in this WebView. This handheld pays from Jupiter Wallet, not a local burner.
+
+A 402 is written to `sessionStorage` before Jupiter opens. When MWA backgrounds the app, in-flight `fetch` can throw WebView `Load failed` / `TypeError` — those are never shown. On `resume`, pay/build runs again with a fresh blockhash.
 
 ## What ships
 
@@ -37,6 +41,8 @@ Bridge messages:
 | app → shell | `wallet-disconnect` | exit to shell |
 | app → shell | `wallet-sign-transaction` | `{ id, transaction }` → partial-sign only |
 | app → shell | `wallet-sign-and-send-transaction` | `{ id, transaction }` → wrap / top-up may send |
+| app → shell | `wallet-copy-text` | `{ id, text }` → Android clipboard |
+| shell → app | `app-pause` / `app-resume` | MWA background / return — retry pay/build |
 
 `wallet-sign-transaction` calls **`MWA.signTransaction`**. Never `signAndSendTransaction` for x402 — the gateway feePayer must complete settlement. Wrap / top-up is the only send path.
 

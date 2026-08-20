@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://api.mainnet-beta.solana.com https: wss: ws:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self'; media-src 'self';">
+    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://api.mainnet-beta.solana.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self'; media-src 'self';">
   <title>OpenZoo</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -91,8 +91,17 @@
       font-size: 12px; color: #00FFB5; word-break: break-all;
       padding: 12px 14px; background: #1C1628;
       border-radius: 8px; border: 1px solid rgba(0, 255, 181, 0.2);
-      line-height: 1.5;
+      line-height: 1.5; cursor: pointer;
+      -webkit-user-select: all; user-select: all;
     }
+    #copiedToast {
+      position: fixed; z-index: 4000; pointer-events: none; left: 50%; top: 18px;
+      padding: 7px 14px; border-radius: 999px; background: #00FFB5; color: #0A080D;
+      font: 700 12px/1.2 ui-rounded, "SF Pro Rounded", sans-serif;
+      letter-spacing: .06em; opacity: 0; transform: translate(-50%, -6px);
+      transition: opacity .14s ease, transform .14s ease;
+    }
+    #copiedToast.show { opacity: 1; transform: translate(-50%, 0); }
     .powered {
       position: fixed; bottom: 0; left: 0; right: 0;
       text-align: center; padding: 12px;
@@ -122,7 +131,7 @@
 
   <div id="connected" data-component="connected-panel">
     <div class="lbl" data-component="connected-label">CONNECTED</div>
-    <div class="addr" id="addr" data-component="wallet-address"></div>
+    <div class="addr" id="addr" data-component="wallet-address" title="Tap to copy"></div>
     <button class="btn primary" onclick="launchApp()" style="margin-top:20px;" data-testid="open-button">
       OPEN OPENZOO
     </button>
@@ -131,6 +140,7 @@
     </button>
   </div>
 
+  <div id="copiedToast" role="status" aria-live="polite">copied</div>
   <div class="powered" data-component="footer">OpenZoo · Play Solana PSG1</div>
 
   <!-- Cordova bridge — only exists when served from local www/ -->
@@ -159,7 +169,79 @@
     console.log('[wallet-shell] ' + msg);
   }
 
-  function setStatus(msg) { $status.textContent = msg; }
+  function setStatus(msg) {
+    var text = String(msg || '');
+    var low = text.toLowerCase();
+    if (
+      low.indexOf('load failed') >= 0 ||
+      low.indexOf('failed to fetch') >= 0 ||
+      low.indexOf('typeerror') >= 0 ||
+      low.indexOf('networkerror') >= 0
+    ) {
+      text = 'Connection dropped. Return to OpenZoo and retry.';
+    }
+    $status.textContent = text;
+  }
+
+  function postToApp(payload) {
+    var iframe = document.getElementById('game');
+    if (!iframe || !iframe.contentWindow) return false;
+    try {
+      iframe.contentWindow.postMessage(payload, GAME_ORIGIN);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function notifyAppLifecycle(type) {
+    postToApp({ type: type });
+  }
+
+  function showCopiedToast() {
+    var el = document.getElementById('copiedToast');
+    if (!el) return;
+    el.textContent = 'copied';
+    el.classList.add('show');
+    clearTimeout(showCopiedToast._timer);
+    showCopiedToast._timer = setTimeout(function () { el.classList.remove('show'); }, 1200);
+  }
+
+  function copyTextNative(text, ok, err) {
+    var value = String(text == null ? '' : text);
+    if (window.MWA && typeof MWA.copyText === 'function') {
+      MWA.copyText(value, function () { if (ok) ok(); }, function (e) {
+        if (!copyTextFallback(value)) { if (err) err(e); }
+        else if (ok) ok();
+      });
+      return;
+    }
+    if (copyTextFallback(value)) { if (ok) ok(); }
+    else if (err) err('Clipboard unavailable');
+  }
+
+  function copyTextFallback(value) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+        navigator.clipboard.writeText(value);
+        return true;
+      }
+    } catch (_) {}
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = value;
+      ta.style.cssText = 'position:fixed;top:-1000px;left:-1000px;opacity:0';
+      ta.setAttribute('readonly', '');
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      var copied = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return !!copied;
+    } catch (_) {
+      return false;
+    }
+  }
 
   function showConnected(address, method) {
     connectedAddress = address;
@@ -167,7 +249,8 @@
 
     $picker.style.display = 'none';
     $connected.style.display = 'block';
-    $addr.textContent = address.slice(0, 4) + '...' + address.slice(-4);
+    $addr.textContent = address;
+    $addr.title = 'Tap to copy';
     setStatus('');
     log('Connected: ' + address.slice(0, 8) + '...' + address.slice(-4));
   }
@@ -272,6 +355,24 @@
       log('Re-sent wallet info to iframe');
     }
 
+    if (data.type === 'wallet-copy-text') {
+      var copyIframe = document.getElementById('game');
+      copyTextNative(data.text, function () {
+        copyIframe.contentWindow.postMessage({
+          type: 'wallet-copy-text-response',
+          id: data.id,
+          ok: true
+        }, GAME_ORIGIN);
+      }, function (err) {
+        copyIframe.contentWindow.postMessage({
+          type: 'wallet-copy-text-response',
+          id: data.id,
+          ok: false,
+          error: err || 'copy failed'
+        }, GAME_ORIGIN);
+      });
+    }
+
     // Sign a message with the connected MWA wallet (native approval dialog)
     if (data.type === 'wallet-sign-message') {
       log('Sign request (message) — id:' + data.id);
@@ -345,9 +446,27 @@
      ═══════════════════════════════════════════════ */
   log('Shell loaded');
 
+  $addr.addEventListener('click', function () {
+    if (!connectedAddress) return;
+    copyTextNative(connectedAddress, function () { showCopiedToast(); });
+  });
+
   document.addEventListener('deviceready', function() {
     log('deviceready');
+    document.addEventListener('pause', function () {
+      log('pause — persist 402 across MWA');
+      notifyAppLifecycle('app-pause');
+    }, false);
+    document.addEventListener('resume', function () {
+      log('resume — retry pay/build if a 402 is waiting');
+      notifyAppLifecycle('app-resume');
+    }, false);
   }, false);
+
+  document.addEventListener('visibilitychange', function () {
+    notifyAppLifecycle(document.hidden ? 'app-pause' : 'app-resume');
+  });
+  window.addEventListener('pageshow', function () { notifyAppLifecycle('app-resume'); });
   </script>
 </body>
 </html>

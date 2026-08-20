@@ -47,6 +47,10 @@ test('shell keeps MWA, adds wrap send, and does not bounce :8402', () => {
   assert.doesNotMatch(shell, /http:\/\/localhost:8402|127\.0\.0\.1:8402/);
   assert.doesNotMatch(shell, /phantom\.app\/ul|solflare\.com\/ul/i);
   assert.match(shell, /https:\/\/x402\.accrue\.fund/);
+  assert.match(shell, /https:\/\/x402-tokens\.fly\.dev/);
+  assert.match(shell, /https:\/\/api\.mainnet-beta\.solana\.com/);
+  assert.match(shell, /MWA\.copyText/);
+  assert.match(shell, /app-resume/);
 });
 
 test('layout is the grokui canvas, not a fly.dev form', () => {
