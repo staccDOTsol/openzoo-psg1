@@ -9,6 +9,7 @@ const ROOT = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(ROOT, 'www/app/index.html'), 'utf8');
 const css = fs.readFileSync(path.join(ROOT, 'www/app/app.css'), 'utf8');
 const app = fs.readFileSync(path.join(ROOT, 'www/app/app.js'), 'utf8');
+const pay = fs.readFileSync(path.join(ROOT, 'www/app/pay.js'), 'utf8');
 const shell = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
 const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 
@@ -37,6 +38,7 @@ test('app never surfaces bind plumbing or drained mint to the user', () => {
   assert.doesNotMatch(app, /Need yUSDCx or wTOKENx/);
   assert.doesNotMatch(app, /Bo7xBF7SY8EyUBPUxRP66SFafxoPf2n5uqiLjbxEebx9/);
   assert.doesNotMatch(app, /localhost:8402/);
+  assert.doesNotMatch(app, /['"]Load failed['"]/);
 });
 
 test('shell keeps MWA, adds wrap send, and does not bounce :8402', () => {
@@ -60,4 +62,32 @@ test('layout is the grokui canvas, not a fly.dev form', () => {
   assert.match(readme, /threads/i);
   assert.match(readme, /wTOKENx2/);
   assert.doesNotMatch(readme, /http:\/\/localhost:8402|127\.0\.0\.1:8402/);
+});
+
+test('x402 prompts for wrap / short SOL / short tokens and copies the address', () => {
+  assert.match(html, /id="payPromptOverlay"/);
+  assert.match(html, /id="payPromptAddr"/);
+  assert.match(pay, /You have/);
+  assert.match(pay, /Wrap enough to send this/);
+  assert.match(pay, /pickLargestUseful/);
+  assert.match(pay, /depositForShares/);
+  assert.match(app, /promptWrap|confirmWrap/);
+  assert.match(app, /promptFunds|needFunds/);
+  assert.match(app, /copyText|OpenZooCopy/);
+  assert.match(app, /Tap to copy/);
+  assert.match(app, /onAppResume|resumePendingPay/);
+  assert.doesNotMatch(app, /['"]Load failed['"]/);
+  assert.doesNotMatch(html, /Load failed/);
+  assert.doesNotMatch(pay, /localhost:8402/);
+});
+
+test('shell persists 402 across MWA backgrounding via pause/resume', () => {
+  assert.match(shell, /app-resume/);
+  assert.match(shell, /app-pause/);
+  assert.match(shell, /MWA\.copyText/);
+  assert.match(pay, /persistPending402/);
+  assert.match(pay, /waitForResumeOr/);
+  assert.match(pay, /resumePendingPay/);
+  assert.doesNotMatch(shell, /['"]Load failed['"]/);
+  assert.doesNotMatch(shell, /http:\/\/localhost:8402|127\.0\.0\.1:8402/);
 });

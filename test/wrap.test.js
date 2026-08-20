@@ -110,6 +110,80 @@ test('pickPayableRail uses live twin holdings, not the first row', () => {
   assert.equal(wrap.pool.bump, 254);
 });
 
+test('pickLargestUseful does not skip $10 TOKEN just because twin maxAmountRequired is larger', () => {
+  const USDC = OpenZooWrap.USDC_MINT;
+  const yUSDCx = '6ZjjxcoicqM4nniddkuPVwew4PDwY3swbfHsGbCuLuTv';
+  const kinds = LIVE_KINDS.kinds.concat([{
+    scheme: 'exact',
+    network: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+    extra: {
+      asset: yUSDCx,
+      symbol: 'yUSDCx',
+      acquire: {
+        method: 'spl-token-wrap',
+        program: 'FrSERTNCPvTtaDS9AvQp9u1nYGzXDb3kC9MdL8Xxn2NE',
+        underlying: { address: USDC, symbol: 'USDC', decimals: 6, tokenProgram: OpenZooWrap.TOKEN_LEGACY },
+        escrow: 'escrow-usdc',
+        mintAuthority: 'auth-usdc',
+        authorityBump: 255
+      }
+    }
+  }]);
+  const rails = [
+    { asset: yUSDCx, maxAmountRequired: '50000000', extra: { symbol: 'yUSDCx' } },
+    { asset: WTOKENx2, maxAmountRequired: '50000000', extra: { symbol: 'wTOKENx2' } }
+  ];
+  // $10 TOKEN = 10_000_000 raw. Comparing that to 50_000_000 shares would skip it.
+  const tenToken = '10000000';
+  const wrap = OpenZooPay.pickLargestUseful(rails, { [TOKEN]: tenToken, [USDC]: '1' }, kinds);
+  assert.ok(wrap, 'held TOKEN > 0 must be useful even when raw < twin maxAmountRequired');
+  assert.equal(wrap.row.asset, WTOKENx2);
+  assert.equal(wrap.underlying, 10000000n);
+  assert.equal(OpenZooPay.heldName(TOKEN), 'TOKEN');
+});
+
+test('pickLargestUseful uses depositForShares when pool state is known', () => {
+  const rails = [
+    { asset: WTOKENx2, maxAmountRequired: '100', extra: { symbol: 'wTOKENx2' } }
+  ];
+  const tooSmall = OpenZooPay.pickLargestUseful(
+    rails,
+    { [TOKEN]: '50' },
+    LIVE_KINDS.kinds,
+    { [WTOKENx2]: { reserves: 0n, supply: 0n } }
+  );
+  // genesis lock needs shares + 1000; 50 TOKEN cannot cover 1100
+  assert.equal(tooSmall, null);
+  const enough = OpenZooPay.pickLargestUseful(
+    rails,
+    { [TOKEN]: '2000' },
+    LIVE_KINDS.kinds,
+    { [WTOKENx2]: { reserves: 0n, supply: 0n } }
+  );
+  assert.ok(enough);
+  assert.equal(enough.row.asset, WTOKENx2);
+});
+
+test('prompt copy and Load failed stay user-facing', () => {
+  assert.equal(OpenZooPay.wrapPromptCopy('TOKEN').body, 'Wrap enough to send this?');
+  assert.match(OpenZooPay.wrapPromptCopy('TOKEN').title, /You have TOKEN/);
+  assert.match(OpenZooPay.shortSolCopy().body, /SOL/);
+  assert.match(OpenZooPay.shortTokensCopy(['TOKEN']).body, /TOKEN/);
+  assert.equal(OpenZooPay.looksLoadFailed('Load failed'), true);
+  assert.doesNotMatch(OpenZooPay.humanizePayError(new Error('Load failed')), /Load failed/);
+  assert.match(OpenZooPay.humanizePayError(new Error('Load failed')), /zoo|retry|Jupiter/i);
+  OpenZooPay.clearPending402();
+  OpenZooPay.persistPending402({
+    path: '/v1/chat/completions',
+    step: 'quote',
+    quote: { accepts: [{ asset: WTOKENx2 }] }
+  });
+  const pending = OpenZooPay.loadPending402();
+  assert.equal(pending.path, '/v1/chat/completions');
+  OpenZooPay.clearPending402();
+  assert.equal(OpenZooPay.loadPending402(), null);
+});
+
 test('ATA derivation matches known mainnet vectors', async () => {
   const usdc = await OpenZooCodec.associatedTokenAddress(OWNER, OpenZooWrap.USDC_MINT, OpenZooWrap.TOKEN_LEGACY);
   const token = await OpenZooCodec.associatedTokenAddress(OWNER, OpenZooWrap.TOKEN_MINT, OpenZooWrap.TOKEN_2022);

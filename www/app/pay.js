@@ -103,16 +103,26 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
       storeDel(PENDING_KEY);
       return null;
     }
+    var prev = null;
+    try {
+      var rawPrev = storeGet(PENDING_KEY);
+      if (rawPrev) prev = JSON.parse(rawPrev);
+    } catch (_) { prev = null; }
+    prev = prev || {};
     var row = {
-      path: state.path || '',
-      method: state.method || 'POST',
-      headers: state.headers || {},
-      body: state.body == null ? null : state.body,
-      quote: state.quote || null,
-      payer: state.payer || '',
-      contextId: state.contextId || null,
-      namespace: state.namespace || null,
-      savedAt: Date.now()
+      path: state.path || prev.path || '',
+      method: state.method || prev.method || 'POST',
+      headers: state.headers || prev.headers || {},
+      body: state.body == null ? (prev.body == null ? null : prev.body) : state.body,
+      quote: state.quote || prev.quote || null,
+      payer: state.payer || prev.payer || '',
+      contextId: state.contextId != null ? state.contextId : (prev.contextId || null),
+      namespace: state.namespace != null ? state.namespace : (prev.namespace || null),
+      savedAt: Date.now(),
+      step: state.step || prev.step || '',
+      signedTx: state.signedTx || prev.signedTx || '',
+      envelope: state.envelope || prev.envelope || null,
+      chosenAsset: state.chosenAsset || prev.chosenAsset || ''
     };
     try { storeSet(PENDING_KEY, JSON.stringify(row)); } catch (_) {}
     return row;
@@ -199,6 +209,8 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
     return 'Connection dropped while talking to the zoo. Return to OpenZoo and we will retry — approve in Jupiter Wallet if it is still open.';
   }
 
+  var MIN_WRAP_LAMPORTS = 5000000n;
+
   function UnpayableError(rails, balances, message) {
     this.name = 'UnpayableError';
     this.code = 'UNPAYABLE';
@@ -209,7 +221,65 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
   }
   UnpayableError.prototype = Object.create(Error.prototype);
 
+  function NeedFundsError(kind, message, extra) {
+    extra = extra || {};
+    this.name = 'NeedFundsError';
+    this.code = kind === 'sol' ? 'NEED_SOL' : 'NEED_TOKENS';
+    this.kind = kind;
+    this.message = message;
+    this.address = extra.address || '';
+    this.tokens = extra.tokens || [];
+    this.rails = extra.rails || [];
+    this.balances = extra.balances || {};
+  }
+  NeedFundsError.prototype = Object.create(Error.prototype);
+
+  function heldName(mint) {
+    if (mint === OpenZooWrap.TOKEN_MINT) return 'TOKEN';
+    if (mint === OpenZooWrap.USDC_MINT) return 'USDC';
+    if (mint === OpenZooWrap.LEOS_MINT) return 'LEOS';
+    return 'token';
+  }
+
+  function wrapPromptCopy(symbol) {
+    var name = symbol || 'TOKEN';
+    return {
+      title: 'You have ' + name + '.',
+      body: 'Wrap enough to send this?',
+      ok: 'wrap',
+      cancel: 'not now'
+    };
+  }
+
+  function shortSolCopy() {
+    return {
+      title: 'Need a little SOL',
+      body: 'This wallet needs a little SOL for fees. Tap the address to copy it, send SOL, then retry.'
+    };
+  }
+
+  function shortTokensCopy(tokens) {
+    var list = (tokens && tokens.length) ? tokens : ['TOKEN', 'USDC', 'LEOS'];
+    var which = list.length === 1 ? list[0] : list.join(', ');
+    var send = list.length === 1 ? list[0] : list.slice(0, -1).join(', ') + ', or ' + list[list.length - 1];
+    return {
+      title: 'Need ' + which,
+      body: 'Send ' + send + ' to this wallet. Tap the address to copy it, then retry.'
+    };
+  }
+
+  function looksLoadFailed(msg) {
+    return isTransientNetwork(msg);
+  }
+
+  function readPending402() {
+    return loadPending402();
+  }
+
   function humanizePayError(err) {
+    if (err && err.name === 'NeedFundsError') {
+      return err.kind === 'sol' ? shortSolCopy().body : shortTokensCopy(err.tokens).body;
+    }
     if (err && err.code === 'UNPAYABLE' && err.message) return String(err.message);
     var msg = errorText(err);
     if (isTransientNetwork(err) || isTransientNetwork(msg)) return humanizeNetworkError();
@@ -223,7 +293,7 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
       return 'Payment did not settle. Top up this wallet with USDC, TOKEN, or LEOS, then retry.';
     }
     if (low.indexOf('sol') >= 0 && (low.indexOf('fee') >= 0 || low.indexOf('lamport') >= 0 || low.indexOf('rent') >= 0)) {
-      return 'Need a little SOL in this wallet to top up.';
+      return shortSolCopy().body;
     }
     if (
       /^typeerror\b/.test(low) ||
@@ -280,10 +350,21 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
     }
   }
 
+  async function fetchSolLamports(owner) {
+    if (!owner) return 0n;
+    try {
+      var r = await rpc('getBalance', [owner]);
+      return BigInt((r && r.value) != null ? r.value : 0);
+    } catch (_) {
+      return 0n;
+    }
+  }
+
   async function fetchBalances(owner) {
     var balances = {};
     var ok = 0;
-    if (!owner) return { balances: balances, detected: false };
+    var lamports = 0n;
+    if (!owner) return { balances: balances, detected: false, lamports: 0n };
     var opts = { encoding: 'jsonParsed' };
     try {
       var a = await rpc('getTokenAccountsByOwner', [owner, { programId: TOKEN_2022 }, opts]);
@@ -295,7 +376,8 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
       addParsedBalances(b, balances);
       ok++;
     } catch (_) {}
-    return { balances: balances, detected: ok > 0 };
+    try { lamports = await fetchSolLamports(owner); } catch (_) { lamports = 0n; }
+    return { balances: balances, detected: ok > 0, lamports: lamports };
   }
 
   function pickPayableRail(rails, balances) {
@@ -386,31 +468,93 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
     };
   }
 
-  function pickWrappableRail(rails, balances, kinds) {
-    var have = underlyingHoldings(balances);
+  function uiAmount(raw, decimals) {
+    var d = typeof decimals === 'number' ? decimals : 6;
+    try { return Number(raw) / Math.pow(10, d); }
+    catch (_) { return 0; }
+  }
+
+  function preferUnderlying(mint) {
+    if (mint === OpenZooWrap.TOKEN_MINT) return 3;
+    if (mint === OpenZooWrap.USDC_MINT) return 2;
+    if (mint === OpenZooWrap.LEOS_MINT) return 1;
+    return 0;
+  }
+
+  /**
+   * Pick the wrap candidate this wallet can actually use.
+   * Gate on held > 0 (and depositForShares when pool state is known).
+   * Never compare underlying raw to the twin's maxAmountRequired — $10 TOKEN
+   * is plenty even when wTOKENx2 shares quote larger than TOKEN raw.
+   */
+  function pickLargestUseful(rails, balances, kinds, poolStates) {
+    var have = balances || {};
+    var list = rails || [];
+    var cands = [];
+    var seen = {};
     var i;
-    for (i = 0; i < rails.length; i++) {
-      var row = rails[i];
-      if (row.asset === OpenZooWrap.DRAINED_MINT) continue;
+
+    function consider(row, pool, underRaw) {
+      if (!row || !pool || seen[row.asset]) return;
+      if (underRaw <= 0n) return;
+      var twinHave;
+      try { twinHave = BigInt(have[row.asset] || '0'); }
+      catch (_) { twinHave = 0n; }
+      var need;
+      try { need = BigInt(row.maxAmountRequired || '0'); }
+      catch (_) { need = 0n; }
+      var short = need > twinHave ? need - twinHave : 0n;
+      var deposit = null;
+      if (poolStates && poolStates[row.asset] && short > 0n) {
+        var st = poolStates[row.asset];
+        deposit = OpenZooWrap.depositForShares(short, st.reserves, st.supply);
+        if (underRaw < deposit) return;
+      }
+      seen[row.asset] = true;
+      cands.push({
+        row: row,
+        pool: pool,
+        underlying: underRaw,
+        deposit: deposit,
+        ui: uiAmount(underRaw, pool.underlyingDecimals),
+        prefer: preferUnderlying(pool.underlying)
+      });
+    }
+
+    for (i = 0; i < list.length; i++) {
+      var row = list[i];
+      if (!row || row.asset === OpenZooWrap.DRAINED_MINT) continue;
       var pool = OpenZooWrap.acquireForMint(kinds, row.asset);
       if (!pool) continue;
-      var under = BigInt(balances[pool.underlying] || '0');
-      if (under <= 0n) continue;
-      return { row: row, pool: pool, underlying: under };
+      var under;
+      try { under = BigInt(have[pool.underlying] || '0'); }
+      catch (_) { under = 0n; }
+      consider(row, pool, under);
     }
+
+    var holdings = underlyingHoldings(have);
     var prefer = [
-      { mint: OpenZooWrap.TOKEN_MINT, have: have.token },
-      { mint: OpenZooWrap.USDC_MINT, have: have.usdc },
-      { mint: OpenZooWrap.LEOS_MINT, have: have.leos }
+      { mint: OpenZooWrap.TOKEN_MINT, have: holdings.token },
+      { mint: OpenZooWrap.USDC_MINT, have: holdings.usdc },
+      { mint: OpenZooWrap.LEOS_MINT, have: holdings.leos }
     ];
     for (i = 0; i < prefer.length; i++) {
       if (prefer[i].have <= 0n) continue;
       var twin = OpenZooWrap.findTwinForUnderlying(kinds, prefer[i].mint);
       if (!twin) continue;
-      var match = pickPreferredRail(rails, twin.wrapped);
-      if (match) return { row: match, pool: twin, underlying: prefer[i].have };
+      var match = pickPreferredRail(list, twin.wrapped);
+      if (match) consider(match, twin, prefer[i].have);
     }
-    return null;
+
+    cands.sort(function (a, b) {
+      if (a.ui !== b.ui) return b.ui - a.ui;
+      return b.prefer - a.prefer;
+    });
+    return cands[0] || null;
+  }
+
+  function pickWrappableRail(rails, balances, kinds, poolStates) {
+    return pickLargestUseful(rails, balances, kinds, poolStates);
   }
 
   async function topUpForRail(row, pool, balances, hooks) {
@@ -422,8 +566,9 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
     var deposit = OpenZooWrap.depositForShares(short, state.reserves, state.supply);
     var under = BigInt(balances[pool.underlying] || '0');
     if (under < deposit) {
-      throw new UnpayableError([row], balances,
-        'This wallet needs more USDC, TOKEN, or LEOS to cover the call.');
+      throw new NeedFundsError('tokens',
+        shortTokensCopy([heldName(pool.underlying)]).body,
+        { rails: [row], balances: balances, tokens: [heldName(pool.underlying)] });
     }
     if (hooks.onStatus) hooks.onStatus('Topping up…');
     var compiled = await OpenZooWrap.compileWrapTx(pool, hooks.payer, deposit, RPC_URL);
@@ -432,8 +577,22 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
         throw new Error('wTOKENx2 wrap shape is wrong');
       }
     }
-    var sig = await OpenZooWrap.signAndSendViaBridge(compiled.transaction);
-    return { wrapped: true, signature: sig, deposit: deposit.toString() };
+    try {
+      var sig = await OpenZooWrap.signAndSendViaBridge(compiled.transaction);
+      return { wrapped: true, signature: sig, deposit: deposit.toString() };
+    } catch (err) {
+      var wmsg = errorText(err);
+      var wlow = wmsg.toLowerCase();
+      if (
+        wlow.indexOf('lamport') >= 0 ||
+        wlow.indexOf('rent') >= 0 ||
+        (wlow.indexOf('sol') >= 0 && (wlow.indexOf('fee') >= 0 || wlow.indexOf('insufficient') >= 0)) ||
+        wlow.indexOf('insufficient funds for') >= 0
+      ) {
+        throw new NeedFundsError('sol', shortSolCopy().body, { rails: [row], balances: balances });
+      }
+      throw err;
+    }
   }
 
   async function chooseRail(accepts, hooks) {
@@ -443,11 +602,13 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
     }
     var balances = {};
     var detected = false;
+    var lamports = 0n;
     if (hooks.payer) {
       try {
         var got = await fetchBalances(hooks.payer);
         balances = got.balances;
         detected = got.detected;
+        lamports = got.lamports || 0n;
       } catch (_) {
         detected = false;
       }
@@ -464,33 +625,98 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
       if (pref) chosen = pref;
     }
     if (!chosen && detected && kinds.length) {
-      wrapPlan = pickWrappableRail(rails, balances, kinds);
+      wrapPlan = pickLargestUseful(rails, balances, kinds);
       if (wrapPlan) chosen = wrapPlan.row;
     }
     if (!chosen) {
-      throw new UnpayableError(rails, balances,
-        detected
-          ? 'This wallet needs USDC, TOKEN, or LEOS before it can pay.'
-          : 'Could not read this wallet. Reconnect Jupiter Wallet and retry.'
-      );
+      if (!detected) {
+        throw new Error('Could not read this wallet. Reconnect Jupiter Wallet and retry.');
+      }
+      var uh = underlyingHoldings(balances);
+      var held = [];
+      if (uh.token > 0n) held.push('TOKEN');
+      if (uh.usdc > 0n) held.push('USDC');
+      if (uh.leos > 0n) held.push('LEOS');
+      var tokens = held.length ? held : ['TOKEN', 'USDC', 'LEOS'];
+      throw new NeedFundsError('tokens', shortTokensCopy(tokens).body, {
+        rails: rails, balances: balances, tokens: tokens, address: hooks.payer || ''
+      });
     }
     return {
       chosen: chosen,
       rails: rails,
       balances: balances,
       detected: detected,
-      wrapPlan: wrapPlan
+      wrapPlan: wrapPlan,
+      lamports: lamports
     };
+  }
+
+  async function promptNeedFunds(hooks, err) {
+    if (hooks.needFunds) {
+      await hooks.needFunds({
+        kind: err.kind,
+        address: err.address || hooks.payer || '',
+        tokens: err.tokens || [],
+        message: err.message
+      });
+    }
+    throw err;
   }
 
   async function settle402(body, hooks) {
     hooks = hooks || {};
+    persistPending402({ quote: body, payer: hooks.payer, step: 'choose' });
     if (hooks.onStatus) hooks.onStatus('Preparing payment…');
-    var pick = await chooseRail(body.accepts, hooks);
+    var pick;
+    try {
+      pick = await chooseRail(body.accepts, hooks);
+    } catch (err) {
+      if (err && err.name === 'NeedFundsError') {
+        err.address = err.address || hooks.payer || '';
+        await promptNeedFunds(hooks, err);
+      }
+      throw err;
+    }
     if (hooks.onRail) hooks.onRail(pick);
     if (!hooks.payer) throw new Error('Connect Jupiter Wallet to pay.');
     if (pick.wrapPlan) {
-      await topUpForRail(pick.chosen, pick.wrapPlan.pool, pick.balances, hooks);
+      var sol = pick.lamports;
+      if (sol == null) {
+        try { sol = await fetchSolLamports(hooks.payer); }
+        catch (_) { sol = 0n; }
+      }
+      if (sol < MIN_WRAP_LAMPORTS) {
+        var solErr = new NeedFundsError('sol', shortSolCopy().body, {
+          address: hooks.payer,
+          rails: pick.rails,
+          balances: pick.balances
+        });
+        await promptNeedFunds(hooks, solErr);
+      }
+      var from = heldName(pick.wrapPlan.pool.underlying);
+      persistPending402({ step: 'prompt-wrap', chosenAsset: pick.chosen && pick.chosen.asset });
+      if (hooks.confirmWrap) {
+        var ok = await hooks.confirmWrap({
+          symbol: from,
+          rail: railSymbol(pick.chosen),
+          pool: pick.wrapPlan.pool,
+          copy: wrapPromptCopy(from)
+        });
+        if (!ok) {
+          throw new Error('Wrap cancelled.');
+        }
+      }
+      persistPending402({ step: 'wrap' });
+      try {
+        await topUpForRail(pick.chosen, pick.wrapPlan.pool, pick.balances, hooks);
+      } catch (err) {
+        if (err && err.name === 'NeedFundsError') {
+          err.address = err.address || hooks.payer || '';
+          await promptNeedFunds(hooks, err);
+        }
+        throw err;
+      }
       var again = await fetchBalances(hooks.payer);
       pick.balances = again.balances;
       if (pickPayableRail([pick.chosen], pick.balances) == null) {
@@ -499,9 +725,16 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
       }
     }
     if (hooks.onStatus) hooks.onStatus('Approve in Jupiter Wallet…');
+    persistPending402({ step: 'pay-build', chosenAsset: pick.chosen && pick.chosen.asset });
     var built = await buildPayment(pick.chosen, hooks.payer, hooks);
+    persistPending402({
+      step: 'pay-sign',
+      envelope: built.envelope,
+      chosenAsset: pick.chosen && pick.chosen.asset
+    });
     var signed = await signViaBridge(built.transaction);
     if (!signed) throw new Error('Wallet returned an empty signature');
+    persistPending402({ step: 'retry', signedTx: signed });
     return {
       header: encodeXPayment(built.envelope, signed),
       rail: pick.chosen,
@@ -584,7 +817,9 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
       contextId: pending.contextId || hooks.contextId,
       namespace: pending.namespace || hooks.namespace,
       onStatus: hooks.onStatus,
-      onRail: hooks.onRail
+      onRail: hooks.onRail,
+      confirmWrap: hooks.confirmWrap,
+      needFunds: hooks.needFunds
     };
     if (hooks.onStatus) hooks.onStatus('Retrying payment…');
     var paid = await settle402(pending.quote, settleHooks);
@@ -688,18 +923,29 @@ var OpenZooPay = (function (OpenZooWrap, OpenZooCodec) {
     billedUsd: billedUsd,
     encodeXPayment: encodeXPayment,
     UnpayableError: UnpayableError,
+    NeedFundsError: NeedFundsError,
     humanizePayError: humanizePayError,
     isTransientNetwork: isTransientNetwork,
+    looksLoadFailed: looksLoadFailed,
+    heldName: heldName,
+    wrapPromptCopy: wrapPromptCopy,
+    shortSolCopy: shortSolCopy,
+    shortTokensCopy: shortTokensCopy,
     persistPending402: persistPending402,
     loadPending402: loadPending402,
+    readPending402: readPending402,
     clearPending402: clearPending402,
+    PENDING_KEY: PENDING_KEY,
+    MIN_WRAP_LAMPORTS: MIN_WRAP_LAMPORTS,
     notifyPause: notifyPause,
     notifyResume: notifyResume,
     onAppResume: onAppResume,
     resumePendingPay: resumePendingPay,
     fetchBalances: fetchBalances,
+    fetchSolLamports: fetchSolLamports,
     pickPayableRail: pickPayableRail,
     pickWrappableRail: pickWrappableRail,
+    pickLargestUseful: pickLargestUseful,
     paidFetch: paidFetch,
     settle402: settle402,
     buildPayment: buildPayment,
