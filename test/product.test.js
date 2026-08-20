@@ -86,6 +86,36 @@ test('x402 prompts for wrap / short SOL / short tokens and copies the address', 
   assert.doesNotMatch(pay, /localhost:8402/);
 });
 
+test('dark launch loader covers launchApp blank and dismisses on chrome-ready, not models', () => {
+  const body = shell.replace(/^[\s\S]*<body[^>]*>/i, '');
+  assert.match(body, /^\s*<div id="oz-boot"/);
+  assert.match(shell, /#oz-boot\s*\{[^}]*z-index:\s*10000/);
+  assert.match(shell, /#oz-boot\s*\{[^}]*background:\s*#0A080D/);
+  assert.match(shell, /id="oz-boot"[^>]*>starting/);
+  assert.match(shell, /oz-boot-dots/);
+  assert.match(shell, /@keyframes oz-boot-dot/);
+  const bootHtml = shell.slice(shell.indexOf('id="oz-boot"'), shell.indexOf('</div>', shell.indexOf('id="oz-boot"')));
+  assert.doesNotMatch(bootHtml, /<img|mark\.png|logo/i);
+  assert.match(shell, /z-index:9999/);
+
+  assert.match(shell, /function launchApp\s*\(/);
+  const launch = shell.slice(shell.indexOf('function launchApp'), shell.indexOf('function disconnect'));
+  assert.match(launch, /showBootOverlay\s*\(/);
+  const createChunk = launch.slice(launch.indexOf("createElement('iframe')"), launch.indexOf('appendChild(iframe)'));
+  assert.doesNotMatch(createChunk, /hideBootOverlay/);
+  assert.match(launch, /setTimeout\(hideBootOverlay,\s*50\)/);
+  assert.match(launch, /setTimeout\(hideBootOverlay,\s*4000\)/);
+  assert.match(shell, /DOMContentLoaded[\s\S]*hideBootOverlay/);
+  assert.match(shell, /type === 'openzoo-chrome-ready'[\s\S]*hideBootOverlay/);
+
+  const readyIdx = app.indexOf("type: 'openzoo-chrome-ready'");
+  const renderIdx = app.lastIndexOf('render();');
+  const loadIdx = app.lastIndexOf('loadModels();');
+  assert.ok(readyIdx > 0, 'app posts openzoo-chrome-ready');
+  assert.ok(renderIdx > 0 && renderIdx < readyIdx, 'chrome-ready after first render()');
+  assert.ok(loadIdx > readyIdx, 'chrome-ready before loadModels() — do not wait on models');
+});
+
 test('shell persists 402 across MWA backgrounding via pause/resume', () => {
   assert.match(shell, /app-resume/);
   assert.match(shell, /app-pause/);
