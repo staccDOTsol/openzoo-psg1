@@ -23,10 +23,10 @@ import java.util.concurrent.TimeoutException;
 
 public class MWAPlugin extends CordovaPlugin {
     private static final String TAG = "MWAPlugin";
-    // Dapp identity shown in the wallet's approval dialog — customize for your game
-    private static final String IDENTITY_URI  = "https://example.com";
+    // Dapp identity shown in the Jupiter Wallet approval dialog — not CordovaSeeker
+    private static final String IDENTITY_URI  = "https://openzoo.fun";
     private static final String IDENTITY_ICON = "icons/icon-192.png";
-    private static final String IDENTITY_NAME = "CordovaSeeker";
+    private static final String IDENTITY_NAME = "OpenZoo";
     private static final String CHAIN         = "solana:mainnet";
     private static final int SCENARIO_TIMEOUT_MS = 90000;
     private static final String B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";

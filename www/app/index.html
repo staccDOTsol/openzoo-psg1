@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en" data-page="openzoo-psg1">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://api.mainnet-beta.solana.com; img-src 'self' data:; style-src 'self' 'unsafe-inline';">
+  <title>OpenZoo</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body data-component="openzoo-app">
+  <header data-component="topbar">
+    <img class="mark" src="../mark.png" alt="" width="28" height="28">
+    <h1>openzoo</h1>
+    <span class="chip" id="walletChip" data-component="wallet-chip">no wallet</span>
+    <span style="flex:1"></span>
+    <button class="ghost" id="exit" data-testid="exit-button">exit</button>
+  </header>
+
+  <div class="toolbar" data-component="toolbar">
+    <input id="model" list="modelList" data-component="model-picker" placeholder="pick a model…">
+    <datalist id="modelList"></datalist>
+    <button class="ghost" id="brainBtn" data-component="brain-toggle">bind</button>
+    <button class="ghost" id="statsBtn" data-component="stats-toggle">stats</button>
+    <button class="ghost" id="newBtn" data-component="new-chat">new</button>
+  </div>
+
+  <div class="chips" data-component="chips">
+    <span class="chip" id="ctxChip" data-component="ctx-chip" hidden></span>
+    <span class="chip" id="netChip" data-component="net-chip">connecting…</span>
+    <span class="chip" id="railChip" data-component="rail-status" hidden></span>
+  </div>
+
+  <div id="railWarn" class="rail-warn" data-component="rail-warn" hidden></div>
+
+  <div id="drawer" class="drawer" data-component="brain-drawer">
+    <p class="tiny">Paste a corpus. Bind is free: <code>POST /v1/hrr/bind { corpus }</code> → <code>context_id</code>. Later chats send <code>x-hrr-context</code>. Not RUN / WRITE / READ / SERVE.</p>
+    <textarea id="corpus" data-component="corpus-input" placeholder="paste corpus… (or drop a .txt/.md file)"></textarea>
+    <div class="drawer-actions">
+      <button class="send" id="bindBtn" data-component="bind-button">bind it</button>
+      <span class="tiny" id="bindStatus" data-role="bind-status"></span>
+    </div>
+  </div>
+
+  <div id="statsDrawer" class="drawer" data-component="stats-drawer">
+    <p class="tiny">Public <code>GET https://x402-tokens.fly.dev/v1/stats</code> — no wallet.</p>
+    <div id="statsBox" data-component="stats-box">loading…</div>
+  </div>
+
+  <div id="chat" data-component="chat-scroll">
+    <div class="row" data-row="welcome">
+      <div class="bubble zoo">
+        OpenZoo on Play Solana PSG1. Chat, bind, stats only — no RUN / WRITE / READ / SERVE.
+        Bind a corpus, then ask. The phone talks to x402-tokens.fly.dev (not localhost:8402).
+      </div>
+    </div>
+  </div>
+
+  <footer data-component="composer-bar">
+    <div class="composer">
+      <textarea id="box" data-component="message-input" placeholder="message the zoo…" rows="2"></textarea>
+      <button class="send" id="sendBtn" data-component="send-button">send</button>
+    </div>
+    <div class="ticker" data-component="ticker">
+      <span id="spent" data-role="spent-ticker">this session: $0.0000</span>
+      <span id="saved" data-role="saved-ticker"></span>
+      <span id="calls" data-role="calls-ticker"></span>
+    </div>
+  </footer>
+
+  <script src="pay.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

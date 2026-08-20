@@ -5,104 +5,117 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src * https: wss: ws:; img-src * data:; style-src 'self' 'unsafe-inline'; frame-src 'self'; media-src 'self';">
-  <title>CordovaSeeker</title>
+    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://x402-tokens.fly.dev https://api.mainnet-beta.solana.com https: wss: ws:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self'; media-src 'self';">
+  <title>OpenZoo</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; background: #000; }
+    html, body { width: 100%; height: 100%; background: #0A080D; }
     body {
       display: flex; flex-direction: column; align-items: center;
       justify-content: center; min-height: 100vh;
-      font-family: monospace; color: #fff;
-      padding: 40px 20px 60px;
+      font-family: ui-rounded, "SF Pro Rounded", -apple-system, "Segoe UI", sans-serif;
+      color: #f4f1fb;
+      padding: 28px 20px 56px;
       -webkit-user-select: none; user-select: none;
       -webkit-tap-highlight-color: transparent;
       overflow-y: auto;
     }
 
     .logo {
-      width: 120px; height: 120px; border-radius: 20px;
-      margin-bottom: 16px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 64px;
-      background: rgba(100,140,255,0.08);
-      border: 1px solid rgba(100,140,255,0.2);
-      box-shadow: 0 0 40px rgba(60,120,255,0.25);
+      width: 112px; height: 112px; border-radius: 56px;
+      margin-bottom: 14px;
+      overflow: hidden;
+      border: 1px solid rgba(0, 255, 181, 0.28);
+      box-shadow: 0 0 36px rgba(224, 5, 246, 0.16);
+      background: #1C1628;
     }
+    .logo img { width: 100%; height: 100%; display: block; }
     .title {
-      font-size: 28px; font-weight: bold; letter-spacing: 6px;
-      text-shadow: 0 0 30px rgba(100,140,255,0.4), 0 0 60px rgba(100,140,255,0.15);
-      color: #e0e8ff;
+      font-size: 26px; font-weight: 700; letter-spacing: 6px;
+      color: #f4f1fb;
+    }
+    .sub {
+      margin-top: 8px; font-size: 11px; letter-spacing: 2px;
+      color: #00FFB5; text-transform: uppercase;
     }
     .divider {
-      width: 60px; height: 1px; margin: 16px 0 20px;
-      background: linear-gradient(90deg, transparent, rgba(100,140,255,0.4), transparent);
+      width: 56px; height: 1px; margin: 16px 0 18px;
+      background: linear-gradient(90deg, transparent, #00FFB5, transparent);
     }
 
     #picker {
-      display: flex; flex-direction: column; gap: 14px;
-      width: 100%; max-width: 300px;
+      display: flex; flex-direction: column; gap: 12px;
+      width: 100%; max-width: 320px;
     }
     .btn {
       background: rgba(255,255,255,0.04);
       border: 1px solid rgba(255,255,255,0.08);
-      color: #fff; padding: 16px 20px;
-      font-family: monospace; font-size: 14px;
-      letter-spacing: 2px; border-radius: 10px;
+      color: #fff; padding: 15px 18px;
+      font-family: inherit; font-size: 13px;
+      letter-spacing: 1.5px; border-radius: 10px;
       cursor: pointer; text-align: center;
       transition: background 0.15s, transform 0.1s, border-color 0.15s;
     }
     .btn:active { background: rgba(255,255,255,0.08); transform: scale(0.97); }
     .btn:disabled { opacity: 0.3; pointer-events: none; }
     .btn.primary {
-      border-color: rgba(100,140,255,0.35);
-      background: linear-gradient(180deg, rgba(60,90,200,0.10) 0%, rgba(40,60,140,0.05) 100%);
+      border-color: rgba(0, 255, 181, 0.45);
+      background: linear-gradient(180deg, rgba(0, 255, 181, 0.16) 0%, rgba(28, 22, 40, 0.4) 100%);
+      color: #00FFB5;
     }
-    .btn.primary:active { background: rgba(80,120,255,0.12); }
+    .btn.primary:active { background: rgba(0, 255, 181, 0.14); }
     .btn.danger {
       border-color: rgba(255,80,80,0.2);
       color: rgba(255,255,255,0.5); font-size: 12px; padding: 10px;
     }
+    .hint {
+      font-size: 11px; line-height: 1.45;
+      color: rgba(232, 240, 220, 0.45);
+      text-align: center;
+    }
 
     #status {
-      margin-top: 16px; font-size: 12px;
-      color: rgba(255,255,255,0.35); text-align: center;
-      max-width: 300px; word-break: break-all; min-height: 18px;
+      margin-top: 14px; font-size: 12px;
+      color: rgba(255,255,255,0.38); text-align: center;
+      max-width: 320px; word-break: break-all; min-height: 18px;
     }
     #connected {
       display: none; text-align: center;
-      margin-top: 20px; width: 100%; max-width: 300px;
+      margin-top: 16px; width: 100%; max-width: 320px;
     }
     .lbl {
       font-size: 10px; letter-spacing: 3px;
-      color: rgba(100,140,255,0.5); margin-bottom: 8px;
+      color: #00FFB5; margin-bottom: 8px;
     }
     .addr {
-      font-size: 12px; color: #8aa8ff; word-break: break-all;
-      padding: 12px 14px; background: rgba(100,140,255,0.05);
-      border-radius: 8px; border: 1px solid rgba(112,144,255,0.12);
+      font-size: 12px; color: #00FFB5; word-break: break-all;
+      padding: 12px 14px; background: #1C1628;
+      border-radius: 8px; border: 1px solid rgba(0, 255, 181, 0.2);
       line-height: 1.5;
     }
     .powered {
       position: fixed; bottom: 0; left: 0; right: 0;
-      text-align: center; padding: 14px;
-      font-size: 10px; letter-spacing: 2px;
-      color: #fff;
+      text-align: center; padding: 12px;
+      font-size: 10px; letter-spacing: 1.6px;
+      color: rgba(232, 240, 220, 0.42);
     }
   </style>
 </head>
 <body>
-  <div class="logo" data-component="logo">&#9889;</div>
-  <div class="title" data-component="title">CORDOVASEEKER</div>
+  <div class="logo" data-component="logo"><img src="mark.png" alt="OpenZoo"></div>
+  <div class="title" data-component="title">OPENZOO</div>
+  <div class="sub" data-component="subtitle">Play Solana PSG1</div>
   <div class="divider" data-component="divider"></div>
 
   <div id="picker" data-component="wallet-picker">
     <button class="btn primary" onclick="connectMWA()" data-testid="connect-wallet">
       CONNECT WALLET
     </button>
-    <button class="btn" onclick="launchGame()" data-testid="play-guest">
-      PLAY AS GUEST
+    <div class="hint">Jupiter Wallet via Mobile Wallet Adapter.<br>Phantom is only a generic-Android test fallback.</div>
+    <button class="btn" onclick="launchApp()" data-testid="open-guest">
+      OPEN WITHOUT WALLET
     </button>
+    <div class="hint">Stats and bind are free. Chat pays via x402 from the wallet.</div>
   </div>
 
   <div id="status" data-component="status"></div>
@@ -110,15 +123,15 @@
   <div id="connected" data-component="connected-panel">
     <div class="lbl" data-component="connected-label">CONNECTED</div>
     <div class="addr" id="addr" data-component="wallet-address"></div>
-    <button class="btn primary" onclick="launchGame()" style="margin-top:22px;" data-testid="play-button">
-      PLAY
+    <button class="btn primary" onclick="launchApp()" style="margin-top:20px;" data-testid="open-button">
+      OPEN OPENZOO
     </button>
     <button class="btn danger" onclick="disconnect()" style="margin-top:8px;" data-testid="disconnect-button">
       DISCONNECT
     </button>
   </div>
 
-  <div class="powered" data-component="footer">Open-source Seeker game template</div>
+  <div class="powered" data-component="footer">OpenZoo · Play Solana PSG1</div>
 
   <!-- Cordova bridge — only exists when served from local www/ -->
   <script src="cordova.js"></script>
@@ -130,9 +143,8 @@
      ═══════════════════════════════════════════════ */
   var connectedAddress = null;   // wallet address after connect
   var connectedMethod  = null;   // 'MWA'
-  // Local game bundled in www/game/. Swap for an https:// URL to load a
-  // remotely-hosted game instead (also update CSP frame-src + allow-navigation).
-  var GAME_URL    = 'game/index.html';
+  // Bundled OpenZoo UI. Do not point at a remote GAME_URL or localhost:8402.
+  var GAME_URL    = 'app/index.html';
   var GAME_ORIGIN = '*'; // local file — no meaningful origin; use event.source check instead
 
   /* ═══════════════════════════════════════════════
@@ -160,11 +172,10 @@
     log('Connected: ' + address.slice(0, 8) + '...' + address.slice(-4));
   }
 
-  function launchGame() {
+  function launchApp() {
     $picker.style.display = 'none';
     $connected.style.display = 'none';
 
-    // Create a fresh iframe each time
     var old = document.getElementById('game');
     if (old) old.remove();
 
@@ -191,11 +202,10 @@
     }
 
     iframe.src = GAME_URL;
-    log('Loading game iframe...');
+    log('Loading OpenZoo iframe...');
   }
 
   function disconnect() {
-    // Tell game iframe we're disconnecting
     var iframe = document.getElementById('game');
     if (iframe && connectedAddress) {
       try {
@@ -203,7 +213,6 @@
       } catch (_) {}
     }
 
-    // Destroy iframe completely
     if (iframe) iframe.remove();
 
     $picker.style.display = 'flex';
@@ -216,14 +225,12 @@
 
   /* ═══════════════════════════════════════════════
      Wallet connect — MWA (Native Plugin)
-     Uses the native Android MWA SDK via cordova-plugin-mwa.
-     Fires startActivity with solana-wallet:// intent,
-     wallet handles WebSocket + auth natively.
+     Jupiter Wallet on PSG1; any MWA wallet on generic Android.
      ═══════════════════════════════════════════════ */
   function connectMWA() {
     if (!window.MWA) {
       log('MWA plugin not loaded');
-      setStatus('Wallet unavailable');
+      setStatus('Wallet unavailable — needs a PSG1 (Jupiter Wallet) or generic Android + MWA wallet');
       return;
     }
     setStatus('Opening wallet...');
@@ -242,22 +249,20 @@
   }
 
   /* ═══════════════════════════════════════════════
-     postMessage bridge — listen for game requests
+     postMessage bridge — listen for app requests
      ═══════════════════════════════════════════════ */
   window.addEventListener('message', function(event) {
-    // Local iframe has no https origin — verify the sender is our game frame
     var gameFrame = document.getElementById('game');
     if (!gameFrame || event.source !== gameFrame.contentWindow) return;
     var data = event.data;
     if (!data || !data.type) return;
 
     if (data.type === 'wallet-disconnect') {
-      log('Game requested disconnect');
+      log('App requested disconnect');
       disconnect();
     }
 
     if (data.type === 'wallet-request-info' && connectedAddress) {
-      // Game is asking for wallet info (e.g. after late init)
       var iframe = document.getElementById('game');
       iframe.contentWindow.postMessage({
         type: 'wallet-connected',
@@ -284,6 +289,30 @@
         );
       } else {
         respond({ error: 'No wallet connected' });
+      }
+    }
+
+    // Partial-sign an x402 payment tx. NEVER signAndSendTransaction —
+    // that submits the tx and breaks settlement (feePayer must complete it).
+    if (data.type === 'wallet-sign-transaction') {
+      log('Sign request (transaction) — id:' + data.id);
+      var txIframe = document.getElementById('game');
+      var respondTx = function(payload) {
+        payload.type = 'wallet-sign-transaction-response';
+        payload.id = data.id;
+        txIframe.contentWindow.postMessage(payload, GAME_ORIGIN);
+      };
+      if (connectedMethod === 'MWA' && window.MWA) {
+        var txB64 = data.transaction || data.txB64 || '';
+        MWA.signTransaction(txB64,
+          function(result) {
+            log('Signed transaction (MWA)');
+            respondTx({ signedTransaction: result.signedTransaction });
+          },
+          function(err) { log('Tx sign failed: ' + err); respondTx({ error: err }); }
+        );
+      } else {
+        respondTx({ error: 'No wallet connected' });
       }
     }
   });
