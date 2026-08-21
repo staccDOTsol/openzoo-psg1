@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://api.mainnet-beta.solana.com https://zoo.openzoo.fun https://openzoo.fun; img-src 'self' data:; style-src 'self' 'unsafe-inline';">
-  <!-- connect-src: x402 door + /supported + Solana RPC + zoo.openzoo.fun (hosted OCC + subscription key). No :8402. No api.anthropic.com. -->
+    content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://api.mainnet-beta.solana.com https://zoo.openzoo.fun https://openzoo.fun; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self' https://zoo.openzoo.fun https://*.openzoo.fun;">
+  <!-- connect-src: x402 door + /supported + Solana RPC + zoo.openzoo.fun (/api/ide/session + subscription key). frame-src: Agent IDE only on OpenZoo hosts. No :8402. No api.anthropic.com. Never an open URL. -->
   <title>openzoo</title>
   <link rel="stylesheet" href="app.css">
 </head>
@@ -50,7 +50,7 @@
   <div id="keyOverlay" data-component="subscription-key-modal">
     <div id="keyBox">
       <h3>Agent key</h3>
-      <p class="wsub">Hosted OCC is gated on an OpenZoo subscription Bearer. No key → no Agent. Chat still pays per call via x402 / Jupiter Wallet. Never an Anthropic API key.</p>
+      <p class="wsub">Agent IDE (cloud code-server + Cline) is gated on an OpenZoo subscription Bearer on /api/ide/session. No key → no Agent. Chat still pays per call via x402 / Jupiter Wallet. Never an Anthropic API key. Never an open URL.</p>
       <div id="keyStatus" class="wnote">No key stored.</div>
       <textarea id="keyPaste" placeholder="paste key or billing success URL…" autocomplete="off" spellcheck="false"></textarea>
       <div class="text-attach-actions">
@@ -81,7 +81,7 @@
       <div id="chatHeaderId"></div>
       <div id="headerDials">
         <select class="dial" id="modeSel" data-component="run-mode" aria-label="Chat or Agent"
-                title="Chat pays x402 from Jupiter Wallet. Agent is hosted OCC + upload — needs a subscription Bearer.">
+                title="Chat pays x402 from Jupiter Wallet. Agent loads cloud code-server + Cline via /api/ide/session — needs a subscription Bearer.">
           <option value="chat" selected>chat</option>
           <option value="agent">agent</option>
         </select>
@@ -123,7 +123,9 @@
       <div class="hfoot" id="hFoot">Connect Jupiter Wallet to pay from this handheld.</div>
     </div>
     <div id="statusChip" class="status-chip" hidden data-component="status-chip"></div>
-    <div id="goalTip" hidden>Pro tip: /goal &lt;job&gt; — hosted OCC keeps working until it's done.</div>
+    <div id="agentPane" hidden data-component="agent-ide">
+      <iframe id="agentFrame" title="OpenZoo Agent IDE" referrerpolicy="no-referrer" allow="clipboard-read; clipboard-write; fullscreen" allowfullscreen></iframe>
+    </div>
     <div id="log" data-component="chat-scroll"></div>
     <div id="bar">
       <div id="plusMenu">
@@ -153,9 +155,6 @@
         <button id="send" type="button" data-component="send-button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>
         </button>
-        <button id="agentStop" type="button" hidden data-component="agent-stop" title="Stop Agent">
-          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-        </button>
       </div>
     </div>
   </div>
@@ -167,7 +166,7 @@
   <script src="race.js"></script>
   <script src="copy.js"></script>
   <script src="sub.js"></script>
-  <script src="occ.js"></script>
+  <script src="ide.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

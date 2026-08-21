@@ -4,7 +4,7 @@ OpenZoo on the [Play Solana](https://playsolana.com) Gen1 handheld: the **grokui
 
 Widget / package id: **`fun.openzoo.psg1`**.
 
-The phone talks to `https://x402-tokens.fly.dev` directly for **chat / x402**. CORS is live. There is no local proxy hop. `connect-src` allows that gateway, `https://x402.accrue.fund` (live `/supported`), `https://api.mainnet-beta.solana.com` (the RPC wrap/balances actually call), and `https://zoo.openzoo.fun` (hosted OCC + subscription key ingest). Never `api.anthropic.com`. Never `ANTHROPIC_API_KEY`. Never an open OCC URL.
+The phone talks to `https://x402-tokens.fly.dev` directly for **chat / x402**. CORS is live. There is no local proxy hop. `connect-src` allows that gateway, `https://x402.accrue.fund` (live `/supported`), `https://api.mainnet-beta.solana.com` (the RPC wrap/balances actually call), and `https://zoo.openzoo.fun` (Agent `/api/ide/session` + subscription key ingest). Never `api.anthropic.com`. Never `ANTHROPIC_API_KEY`. Never an open URL.
 
 Wallet addresses are selectable. Tap an address (or select text) to copy it; a **copied** toast confirms. Copy uses the Android clipboard via the Cordova MWA plugin — `navigator.clipboard` is not a secure-context API in this WebView. This handheld pays from Jupiter Wallet, not a local burner.
 
@@ -15,7 +15,7 @@ A 402 is written to `sessionStorage` before Jupiter opens. When MWA backgrounds 
 | Surface | Role |
 |---|---|
 | `www/index.html` | Wallet shell. Owns MWA. Never app logic. |
-| `www/app/` | grokui-on-a-phone: threads, **chat** (x402), **Agent** (hosted OCC + upload) |
+| `www/app/` | grokui-on-a-phone: threads, **chat** (x402), **Agent** (cloud code-server + Cline) |
 | `cordova-plugin-mwa` | Native MWA: `authorize`, `signMessage`, `signTransaction` (402), `signAndSendTransaction` (wrap only) |
 
 ```
@@ -26,7 +26,7 @@ A 402 is written to `sessionStorage` before Jupiter opens. When MWA backgrounds 
 │  │ iframe: www/app/                     │  │
 │  │  threads / chat / Agent              │  │
 │  │  chat: x402 + MWA                    │  │
-│  │  Agent: hosted OCC + upload (Bearer) │  │
+│  │  Agent: /api/ide/session → IDE webview   │  │
 │  └──────────────────────────────────────┘  │
 └────────────────────────────────────────────┘
 ```
@@ -59,24 +59,22 @@ The wallet address is tap-to-copy. Errors stay human — never a raw "Load faile
 
 The UI never shows context ids, bind routes, bind hashes, or wrap-twin homework. Wallet copy talks about USDC / TOKEN / LEOS.
 
-Desktop RUN / WRITE / READ / SERVE are not on this handheld. Agent is **not** an open PTY — it is hosted OCC over HTTP.
+Desktop RUN / WRITE / READ / SERVE are not on this handheld. Agent is **not** an open PTY and **not** hosted OCC — it is a cloud **code-server + Cline** session loaded in a webview.
 
-## Agent (hosted OCC)
+## Agent (cloud code-server + Cline)
 
 Chat stays the x402 / Jupiter Wallet pay path. Do not strip it.
 
-**Agent = hosted OCC + file upload**, gated on `Authorization: Bearer <subscription key>` on every OCC/upload call. No key → no Agent. The key is pasted from [zoo.openzoo.fun/subscriptions](https://zoo.openzoo.fun/subscriptions) (or the billing success URL). It is never an Anthropic API key. Chat still uses the x402/MWA wallet lane; Agent uses the subscription Bearer, not a wallet token.
+**Agent = cloud code-server + Cline**, gated on `Authorization: Bearer <subscription key>` on `POST`/`GET` `/api/ide/session`. No key → no Agent. The key is pasted from [zoo.openzoo.fun/subscriptions](https://zoo.openzoo.fun/subscriptions) (or the billing success URL). It is never an Anthropic API key. Chat still uses the x402/MWA wallet lane; Agent uses the subscription Bearer, not a wallet token. Never an open URL — the webview only loads an `https` OpenZoo host returned by `/api/ide/session`.
 
-Door (same as iOS/Android — one path set only): `https://zoo.openzoo.fun`
+Door (one path set only): `https://zoo.openzoo.fun`
 
 | Method | Path | Body |
 |---|---|---|
-| `POST` | `/occ/sessions` | `{ threadId, name }` → `{ id }` / `{ session_id }` |
-| `POST` | `/occ/sessions/:id/messages` | `{ text, message, stream: true }` — SSE. `/goal` is just a message string. |
-| `POST` | `/occ/sessions/:id/files` | multipart `file` or JSON `{ name, content, encoding: "base64" }` |
-| `POST` | `/occ/sessions/:id/stop` | interrupt |
+| `POST` | `/api/ide/session` | `{ threadId, name }` → `{ url, password?, id }` |
+| `GET` | `/api/ide/session` | → `{ url, password?, id }` |
 
-SSE: `{ type: delta\|text\|output\|status\|pty\|done\|error }` and OpenAI-style `{ choices: [{ delta: { content } }] }`. A request without `Authorization: Bearer <key>` is 401 — no Agent. Never `ANTHROPIC_API_KEY`. Never an open OCC URL.
+A request without `Authorization: Bearer <key>` is 401 — no Agent. Never `ANTHROPIC_API_KEY`. Never an open URL. The `{ url, password? }` is loaded in the Agent webview (`#agentFrame`). On the PSG1 handheld that webview is **full-bleed**: `viewport-fit=cover`, `#agentFrame` fills Agent mode, no desktop VS Code chrome letterbox. The Chat composer (`#bar`) is hidden in Agent mode. Chat still pays x402. `frame-src` allows only `https://zoo.openzoo.fun` and `https://*.openzoo.fun`.
 
 Chat (unchanged x402 lane):
 
@@ -87,7 +85,7 @@ Chat (unchanged x402 lane):
 | `POST` | `/v1/pay/build` | none — unsigned tx for MWA |
 | `GET` | `/v1/models` | same x402 loop if quoted |
 
-Key ingest (not OCC):
+Key ingest (not Agent IDE):
 
 | Method | Route |
 |---|---|
