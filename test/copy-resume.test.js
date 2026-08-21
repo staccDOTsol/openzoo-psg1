@@ -182,6 +182,8 @@ test('still Cordova + MWA, no :8402 bounce, no iOS deeplink pay path', () => {
   assert.doesNotMatch(shell, /localhost:8402|127\.0\.0\.1:8402/);
   assert.doesNotMatch(shell, /phantom\.app\/ul|solflare\.com\/ul/i);
   assert.doesNotMatch(appJs, /localhost:8402/);
+  const autoJs = fs.readFileSync(path.join(ROOT, 'www/app/auto.js'), 'utf8');
+  assert.doesNotMatch(autoJs, /localhost:8402|127\.0\.0\.1:8402|\/v1\/route/);
   assert.match(appHtml, /id="threads"/);
   assert.match(appJs, /silentBind/);
   assert.match(wrap, /WTOKENx2/);

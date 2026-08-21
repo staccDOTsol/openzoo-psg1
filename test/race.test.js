@@ -454,6 +454,7 @@ test('app wires race dial + live status and keeps the x402 pay path', () => {
   assert.match(app, /OpenZooRace\.brainRace/);
   assert.match(app, /formatRaceStatus|racing /);
   assert.match(app, /tierModels/);
+  assert.match(app, /racePlan\.n >= 2 && !autoOn/);
   assert.match(app, /OpenZooPay\.paidFetch\('\/v1\/chat\/completions'/);
   assert.match(app, /readSseOrJson/);
   assert.match(app, /payHooks\(\{ contextId: plan\.contextId \}\)/);
