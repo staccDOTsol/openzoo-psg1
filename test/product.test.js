@@ -38,6 +38,8 @@ test('app never surfaces bind plumbing or drained mint to the user', () => {
   assert.doesNotMatch(app, /Need yUSDCx or wTOKENx/);
   assert.doesNotMatch(app, /Bo7xBF7SY8EyUBPUxRP66SFafxoPf2n5uqiLjbxEebx9/);
   assert.doesNotMatch(app, /localhost:8402/);
+  assert.match(app, /openzoo\/auto/);
+  assert.doesNotMatch(app, /gpt-4o-mini/);
   assert.doesNotMatch(app, /['"]Load failed['"]/);
   assert.doesNotMatch(app, /SPAWN|worktree/i);
 });
