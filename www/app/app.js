@@ -36,6 +36,7 @@ var activeId = persisted.activeId && threads.some(function (t) { return t.id ===
 var wallet = { address: null, method: null };
 var pendingFiles = [];
 var busy = false;
+var agentCtl = null;
 var sidebarOpen = false;
 var catalogIds = [];
 var payQueue = OpenZooRace.createPayQueue();
@@ -390,6 +391,14 @@ function render() {
 
 function syncSend() {
   $('send').classList.toggle('show', !!$('inp').value.trim() || pendingFiles.length > 0);
+  syncStop();
+}
+
+function syncStop() {
+  var btn = $('agentStop');
+  if (!btn) return;
+  var t = active();
+  btn.hidden = !(busy && t && t.mode === 'agent');
 }
 
 function maxTokens(model) {
@@ -609,11 +618,11 @@ async function sendAgent(t, text, attached) {
     throw Object.assign(new Error('Paste an OpenZoo subscription key to use Agent.'), { name: 'NoSubscriptionError' });
   }
   setStatus('Opening hosted OCC…');
-  var sess = await OpenZooOcc.ensureSession(t.occSession);
-  t.occSession = sess;
+  var sess = await OpenZooOcc.ensureSession(t.occSession, { threadId: t.id, name: t.name });
+  t.occSession = { id: sess.id };
   persist();
   if (attached && attached.length) {
-    setStatus('Uploading to session cwd…');
+    setStatus('Uploading…');
     var wrote = await OpenZooOcc.uploadAll(sess.id, attached.map(function (f) {
       return { name: f.name, path: f.name, content: f.content, bytes: f.bytes };
     }));
@@ -630,18 +639,40 @@ async function sendAgent(t, text, attached) {
     var row = $('log').querySelector('.row.bot.pending .bubble');
     if (row) row.textContent = painted || '…';
   };
+  if (OpenZooOcc.isGoalLine(text)) t.goalSet = true;
+  setStatus('Agent working…');
+  agentCtl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  syncStop();
   var got;
-  if (OpenZooOcc.isGoalLine(text)) {
-    var job = OpenZooOcc.goalText(text);
-    setStatus('Setting /goal…');
-    got = await OpenZooOcc.setGoal(sess.id, job, onDelta);
-    t.goalSet = true;
-  } else {
-    setStatus('Agent working…');
-    got = await OpenZooOcc.sendMessage(sess.id, text, onDelta);
+  try {
+    // /goal is just a message string — no separate HTTP path.
+    got = await OpenZooOcc.sendMessage(sess.id, text, onDelta, agentCtl && agentCtl.signal);
+  } catch (e) {
+    if (e && (e.name === 'AbortError' || /aborted/i.test(e.message || ''))) {
+      return painted || 'interrupted.';
+    }
+    throw e;
+  } finally {
+    agentCtl = null;
+    syncStop();
   }
   persist();
   return (got && got.text) || painted || '';
+}
+
+async function stopAgent() {
+  var t = active();
+  var id = t && t.occSession && t.occSession.id;
+  if (agentCtl) {
+    try { agentCtl.abort(); } catch (_) { /* ignore */ }
+  }
+  if (!id || !window.OpenZooOcc) return;
+  try {
+    await OpenZooOcc.stop(id);
+    setStatus('Agent interrupted.');
+  } catch (e) {
+    setStatus((e && e.message) || String(e), 'warn');
+  }
 }
 
 async function send() {
@@ -666,6 +697,7 @@ async function send() {
   busy = true;
   $('inp').value = '';
   syncSend();
+  syncStop();
 
   var attached = pendingFiles.slice();
   var attachCorpus = corpusFromPending();
@@ -780,6 +812,7 @@ async function send() {
     setStatus(shown, 'warn');
   }
   busy = false;
+  syncStop();
 }
 
 function fmtAmt(raw, decimals) {
@@ -871,6 +904,7 @@ window.addEventListener('message', function (event) {
 window.parent.postMessage({ type: 'wallet-request-info' }, '*');
 
 $('send').onclick = send;
+if ($('agentStop')) $('agentStop').onclick = stopAgent;
 $('inp').addEventListener('input', syncSend);
 $('inp').addEventListener('keydown', function (e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }

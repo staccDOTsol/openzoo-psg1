@@ -4,7 +4,7 @@ OpenZoo on the [Play Solana](https://playsolana.com) Gen1 handheld: the **grokui
 
 Widget / package id: **`fun.openzoo.psg1`**.
 
-The phone talks to `https://x402-tokens.fly.dev` directly (the openzoo.fun door). CORS is live. There is no local proxy hop. `connect-src` allows that gateway, `https://x402.accrue.fund` (live `/supported`), `https://api.mainnet-beta.solana.com` (the RPC wrap/balances actually call), and `https://zoo.openzoo.fun` (subscription key ingest). Never `api.anthropic.com`. Never `ANTHROPIC_API_KEY`.
+The phone talks to `https://x402-tokens.fly.dev` directly for **chat / x402**. CORS is live. There is no local proxy hop. `connect-src` allows that gateway, `https://x402.accrue.fund` (live `/supported`), `https://api.mainnet-beta.solana.com` (the RPC wrap/balances actually call), and `https://zoo.openzoo.fun` (hosted OCC + subscription key ingest). Never `api.anthropic.com`. Never `ANTHROPIC_API_KEY`. Never an open OCC URL.
 
 Wallet addresses are selectable. Tap an address (or select text) to copy it; a **copied** toast confirms. Copy uses the Android clipboard via the Cordova MWA plugin — `navigator.clipboard` is not a secure-context API in this WebView. This handheld pays from Jupiter Wallet, not a local burner.
 
@@ -65,20 +65,18 @@ Desktop RUN / WRITE / READ / SERVE are not on this handheld. Agent is **not** an
 
 Chat stays the x402 / Jupiter Wallet pay path. Do not strip it.
 
-**Agent = hosted OCC + file upload**, gated on `Authorization: Bearer <subscription key>`. No key → no Agent. The key is pasted from [zoo.openzoo.fun/subscriptions](https://zoo.openzoo.fun/subscriptions) (or the billing success URL). It is never an Anthropic API key.
+**Agent = hosted OCC + file upload**, gated on `Authorization: Bearer <subscription key>` on every OCC/upload call. No key → no Agent. The key is pasted from [zoo.openzoo.fun/subscriptions](https://zoo.openzoo.fun/subscriptions) (or the billing success URL). It is never an Anthropic API key. Chat still uses the x402/MWA wallet lane; Agent uses the subscription Bearer, not a wallet token.
 
-Door (same zoo as chat): `https://x402-tokens.fly.dev` — documented on [openzoo.fun](https://openzoo.fun) / [staccDOTsol/openzoo](https://github.com/staccDOTsol/openzoo).
+Door (same as iOS/Android — one path set only): `https://zoo.openzoo.fun`
 
-| Method | Route | Auth | Role |
-|---|---|---|---|
-| `POST` | `/v1/occ/sessions` | Bearer subscription | Open a session (`cwd` defaults to `.`) |
-| `GET` | `/v1/occ/sessions/:id` | Bearer | Session + cwd |
-| `POST` | `/v1/occ/sessions/:id/messages` | Bearer | Message; `stream: true` → SSE |
-| `POST` | `/v1/occ/sessions/:id/goal` | Bearer | `/goal <job>` — OCC keeps working |
-| `PUT` | `/v1/occ/sessions/:id/files?path=<rel>` | Bearer | Raw bytes into **session cwd** |
-| `GET` | `/v1/occ/sessions/:id/files` | Bearer | List files in that cwd |
+| Method | Path | Body |
+|---|---|---|
+| `POST` | `/occ/sessions` | `{ threadId, name }` → `{ id }` / `{ session_id }` |
+| `POST` | `/occ/sessions/:id/messages` | `{ text, message, stream: true }` — SSE. `/goal` is just a message string. |
+| `POST` | `/occ/sessions/:id/files` | multipart `file` or JSON `{ name, content, encoding: "base64" }` |
+| `POST` | `/occ/sessions/:id/stop` | interrupt |
 
-SSE events: `{"type":"delta","text":"…"}` then `{"type":"done"}`. A request without `Authorization: Bearer <key>` is 401 — no Agent.
+SSE: `{ type: delta\|text\|output\|status\|pty\|done\|error }` and OpenAI-style `{ choices: [{ delta: { content } }] }`. A request without `Authorization: Bearer <key>` is 401 — no Agent. Never `ANTHROPIC_API_KEY`. Never an open OCC URL.
 
 Chat (unchanged x402 lane):
 

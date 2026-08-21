@@ -1,24 +1,25 @@
-/* Hosted OCC + file upload. Subscription Bearer only.
-   Not a PTY. Never ANTHROPIC_API_KEY. Chat/x402 is a different lane. */
+/* Hosted OCC + upload — same door as iOS/Android.
+   Origin: https://zoo.openzoo.fun
+   Auth: Authorization: Bearer <subscription key>
+   Never ANTHROPIC_API_KEY. Never an open OCC URL. Chat/x402 is a different lane. */
 'use strict';
 
 var OpenZooOcc = (function (OpenZooSub) {
-  var DOOR = 'https://x402-tokens.fly.dev';
-  var PUBLIC_DOOR = 'https://openzoo.fun';
+  var DOOR = 'https://zoo.openzoo.fun';
   var ROUTES = {
-    sessions: '/v1/occ/sessions',
-    session: function (id) { return '/v1/occ/sessions/' + encodeURIComponent(id); },
-    messages: function (id) { return '/v1/occ/sessions/' + encodeURIComponent(id) + '/messages'; },
-    goal: function (id) { return '/v1/occ/sessions/' + encodeURIComponent(id) + '/goal'; },
-    files: function (id, rel) {
-      var path = '/v1/occ/sessions/' + encodeURIComponent(id) + '/files';
-      if (rel) path += '?path=' + encodeURIComponent(rel);
-      return path;
-    }
+    sessions: '/occ/sessions',
+    messages: function (id) { return '/occ/sessions/' + encodeURIComponent(id) + '/messages'; },
+    files: function (id) { return '/occ/sessions/' + encodeURIComponent(id) + '/files'; },
+    stop: function (id) { return '/occ/sessions/' + encodeURIComponent(id) + '/stop'; }
   };
 
   function doorUrl(path) {
     return DOOR + path;
+  }
+
+  function sessionIdOf(body) {
+    if (!body || typeof body !== 'object') return '';
+    return String(body.id || body.session_id || body.sessionId || '').trim();
   }
 
   function safeRelPath(name) {
@@ -31,11 +32,6 @@ var OpenZooOcc = (function (OpenZooSub) {
 
   function isGoalLine(text) {
     return /^\/goal\b/i.test(String(text || '').trim());
-  }
-
-  function goalText(text) {
-    var m = /^\/goal\s+([\s\S]+)/i.exec(String(text || '').trim());
-    return m ? m[1].trim() : '';
   }
 
   function NoKeyError(message) {
@@ -53,11 +49,28 @@ var OpenZooOcc = (function (OpenZooSub) {
     return out;
   }
 
+  function toBase64(value) {
+    if (value == null) return '';
+    if (typeof Buffer !== 'undefined') {
+      if (typeof value === 'string') return Buffer.from(value, 'utf8').toString('base64');
+      var buf = value instanceof ArrayBuffer ? Buffer.from(new Uint8Array(value)) : Buffer.from(value);
+      return buf.toString('base64');
+    }
+    if (typeof value === 'string') {
+      return btoa(unescape(encodeURIComponent(value)));
+    }
+    var bytes = value instanceof ArrayBuffer ? new Uint8Array(value) : value;
+    var bin = '';
+    var i;
+    for (i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+
   async function occFetch(path, init) {
     init = init || {};
     var hdrs = headers(init.headers || {});
     var requestInit = {
-      method: init.method || 'GET',
+      method: init.method || 'POST',
       headers: hdrs
     };
     if (init.body != null) requestInit.body = init.body;
@@ -75,21 +88,38 @@ var OpenZooOcc = (function (OpenZooSub) {
     return res.json().catch(function () { return {}; });
   }
 
+  function eventText(ev) {
+    if (!ev || typeof ev !== 'object') return '';
+    if (ev.choices && ev.choices[0] && ev.choices[0].delta && ev.choices[0].delta.content) {
+      return String(ev.choices[0].delta.content);
+    }
+    if (ev.type === 'status' || ev.type === 'pty') return '';
+    if (typeof ev.text === 'string') return ev.text;
+    if (typeof ev.output === 'string') return ev.output;
+    if (typeof ev.delta === 'string') return ev.delta;
+    if (ev.delta && typeof ev.delta.text === 'string') return ev.delta.text;
+    if (typeof ev.content === 'string') return ev.content;
+    return '';
+  }
+
   function applySseEvent(ev, acc) {
     if (!ev || typeof ev !== 'object') return acc;
-    if (ev.type === 'delta' && ev.text) acc.text += String(ev.text);
-    else if (ev.type === 'done') {
-      if (ev.text) acc.text = String(ev.text);
-      acc.done = true;
-    } else if (ev.type === 'error') {
+    if (ev.type === 'error') {
       acc.error = String(ev.error || ev.message || 'OCC error');
-    } else if (typeof ev.text === 'string' && ev.type !== 'start') {
-      acc.text += ev.text;
-    } else if (ev.delta && ev.delta.text) {
-      acc.text += String(ev.delta.text);
-    } else if (ev.choices && ev.choices[0] && ev.choices[0].delta && ev.choices[0].delta.content) {
-      acc.text += String(ev.choices[0].delta.content);
+      return acc;
     }
+    if (ev.type === 'done') {
+      acc.done = true;
+      var doneText = eventText(ev);
+      if (doneText) acc.text = acc.text || doneText;
+      return acc;
+    }
+    if (ev.type === 'status' || ev.type === 'pty') {
+      acc.status = ev.text || ev.output || ev.status || acc.status;
+      return acc;
+    }
+    var chunk = eventText(ev);
+    if (chunk) acc.text += chunk;
     return acc;
   }
 
@@ -99,7 +129,7 @@ var OpenZooOcc = (function (OpenZooSub) {
       var reader = res.body.getReader();
       var dec = new TextDecoder();
       var buf = '';
-      var acc = { text: '', done: false, error: null };
+      var acc = { text: '', done: false, error: null, status: '' };
       while (true) {
         var chunk = await reader.read();
         if (chunk.done) break;
@@ -111,15 +141,18 @@ var OpenZooOcc = (function (OpenZooSub) {
           var line = parts[i];
           if (line.indexOf('data:') !== 0) continue;
           var data = line.slice(5).trim();
-          if (!data || data === '[DONE]') continue;
+          if (!data || data === '[DONE]') {
+            if (data === '[DONE]') acc.done = true;
+            continue;
+          }
           try { applySseEvent(JSON.parse(data), acc); } catch (_) {
             acc.text += data;
           }
-          if (onDelta && acc.text) onDelta(acc.text);
+          if (onDelta && acc.text) onDelta(acc.text, acc);
           if (acc.error) throw new Error(acc.error);
         }
       }
-      if (onDelta && acc.text) onDelta(acc.text);
+      if (onDelta && acc.text) onDelta(acc.text, acc);
       return acc;
     }
     var json = await readJson(res);
@@ -137,37 +170,30 @@ var OpenZooOcc = (function (OpenZooSub) {
     var res = await occFetch(ROUTES.sessions, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cwd: opts.cwd || '.' })
+      body: JSON.stringify({
+        threadId: opts.threadId || opts.id || '',
+        name: opts.name || 'agent'
+      })
     });
     var d = await readJson(res);
-    if (!res.ok || !d.id) {
+    var id = sessionIdOf(d);
+    if (!res.ok || !id) {
       throw new Error((d.error && d.error.message) || d.error || ('Could not open OCC session (HTTP ' + res.status + ')'));
     }
-    return { id: d.id, cwd: d.cwd || '.' };
+    return { id: id, name: d.name || opts.name || 'agent' };
   }
 
-  async function ensureSession(existing) {
+  async function ensureSession(existing, opts) {
     if (existing && existing.id) return existing;
-    return createSession();
+    return createSession(opts || {});
   }
 
   async function sendMessage(sessionId, text, onDelta, signal) {
+    var line = String(text || '');
     var res = await occFetch(ROUTES.messages(sessionId), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: String(text || ''), stream: true }),
-      signal: signal
-    });
-    return readOccStream(res, onDelta);
-  }
-
-  async function setGoal(sessionId, goal, onDelta, signal) {
-    var job = String(goal || '').trim();
-    if (!job) throw new Error('Usage: /goal <job>');
-    var res = await occFetch(ROUTES.goal(sessionId), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goal: job, stream: true }),
+      body: JSON.stringify({ text: line, message: line, stream: true }),
       signal: signal
     });
     return readOccStream(res, onDelta);
@@ -175,32 +201,31 @@ var OpenZooOcc = (function (OpenZooSub) {
 
   async function uploadFile(sessionId, file) {
     var rel = safeRelPath(file && (file.path || file.name));
-    var body = file && (file.bytes != null ? file.bytes : file.content);
-    if (body == null) throw new Error('nothing to upload for ' + rel);
-    if (typeof body === 'string') {
-      body = new TextEncoder().encode(body);
+    var raw = file && (file.content != null ? file.content : file.bytes);
+    if (raw == null && !(file && (file.blob || file.file))) {
+      throw new Error('nothing to upload for ' + rel);
     }
-    var res = await occFetch(ROUTES.files(sessionId, rel), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: body
-    });
+    var res;
+    if (typeof FormData !== 'undefined' && file && (file.blob || file.file || file.form)) {
+      var fd = new FormData();
+      fd.append('file', file.blob || file.file || file.form, rel);
+      res = await occFetch(ROUTES.files(sessionId), { method: 'POST', body: fd });
+    } else {
+      res = await occFetch(ROUTES.files(sessionId), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: rel,
+          content: toBase64(raw),
+          encoding: 'base64'
+        })
+      });
+    }
     var d = await readJson(res);
     if (!res.ok) {
       throw new Error((d.error && d.error.message) || d.error || ('upload failed (HTTP ' + res.status + ')'));
     }
-    return {
-      ok: true,
-      path: d.path || rel,
-      bytes: typeof d.bytes === 'number' ? d.bytes : (body.byteLength || body.length || 0),
-      cwd: d.cwd || '.'
-    };
-  }
-
-  async function listFiles(sessionId) {
-    var res = await occFetch(ROUTES.files(sessionId), { method: 'GET' });
-    var d = await readJson(res);
-    return { cwd: d.cwd || '.', files: Array.isArray(d.files) ? d.files : [] };
+    return { ok: true, path: d.path || d.name || rel, name: rel };
   }
 
   async function uploadAll(sessionId, files) {
@@ -213,25 +238,38 @@ var OpenZooOcc = (function (OpenZooSub) {
     return wrote;
   }
 
+  async function stop(sessionId) {
+    var res = await occFetch(ROUTES.stop(sessionId), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    var d = await readJson(res);
+    if (!res.ok) {
+      throw new Error((d.error && d.error.message) || d.error || ('stop failed (HTTP ' + res.status + ')'));
+    }
+    return { ok: true };
+  }
+
   return {
     DOOR: DOOR,
-    PUBLIC_DOOR: PUBLIC_DOOR,
     ROUTES: ROUTES,
     doorUrl: doorUrl,
+    sessionIdOf: sessionIdOf,
     safeRelPath: safeRelPath,
     isGoalLine: isGoalLine,
-    goalText: goalText,
+    toBase64: toBase64,
     headers: headers,
     occFetch: occFetch,
+    eventText: eventText,
     applySseEvent: applySseEvent,
     readOccStream: readOccStream,
     createSession: createSession,
     ensureSession: ensureSession,
     sendMessage: sendMessage,
-    setGoal: setGoal,
     uploadFile: uploadFile,
     uploadAll: uploadAll,
-    listFiles: listFiles
+    stop: stop
   };
 })(typeof OpenZooSub !== 'undefined' ? OpenZooSub : require('./sub.js'));
 

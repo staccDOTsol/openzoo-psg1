@@ -207,6 +207,11 @@ body {
 }
 #send.show { display: flex; }
 #send svg { width: 16px; height: 16px; }
+#agentStop {
+  width: 34px; height: 34px; border-radius: 50%; border: none; background: #f28c4d; color: #0b0b0d;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 34px;
+}
+#agentStop svg { width: 12px; height: 12px; }
 
 #copiedToast {
   position: fixed; z-index: 4000; pointer-events: none; left: 50%; top: 18px;

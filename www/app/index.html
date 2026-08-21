@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://api.mainnet-beta.solana.com https://zoo.openzoo.fun https://openzoo.fun; img-src 'self' data:; style-src 'self' 'unsafe-inline';">
-  <!-- connect-src: x402 door + /supported + Solana RPC + zoo.openzoo.fun (subscription key). Hosted OCC is the same door. No :8402. No api.anthropic.com. -->
+  <!-- connect-src: x402 door + /supported + Solana RPC + zoo.openzoo.fun (hosted OCC + subscription key). No :8402. No api.anthropic.com. -->
   <title>openzoo</title>
   <link rel="stylesheet" href="app.css">
 </head>
@@ -152,6 +152,9 @@
         </div>
         <button id="send" type="button" data-component="send-button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>
+        </button>
+        <button id="agentStop" type="button" hidden data-component="agent-stop" title="Stop Agent">
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
         </button>
       </div>
     </div>
