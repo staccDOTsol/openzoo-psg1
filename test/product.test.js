@@ -52,8 +52,10 @@ test('shell keeps MWA, adds wrap send, and does not bounce :8402', () => {
   assert.match(shell, /https:\/\/x402\.accrue\.fund/);
   assert.match(shell, /https:\/\/x402-tokens\.fly\.dev/);
   assert.match(shell, /https:\/\/api\.mainnet-beta\.solana\.com/);
+  assert.match(shell, /https:\/\/zoo\.openzoo\.fun/);
   assert.match(shell, /MWA\.copyText/);
   assert.match(shell, /app-resume/);
+  assert.doesNotMatch(shell, /ANTHROPIC_API_KEY\s*=/);
 });
 
 test('layout is the grokui canvas, not a fly.dev form', () => {
@@ -62,6 +64,8 @@ test('layout is the grokui canvas, not a fly.dev form', () => {
   assert.match(css, /#b8f240/);
   assert.match(html, /id="raceSel"/);
   assert.match(html, /id="tierSel"/);
+  assert.match(html, /id="modeSel"/);
+  assert.match(html, /id="keyOverlay"/);
   assert.match(readme, /threads/i);
   assert.match(readme, /wTOKENx2/);
   assert.doesNotMatch(readme, /http:\/\/localhost:8402|127\.0\.0\.1:8402/);
@@ -125,4 +129,38 @@ test('shell persists 402 across MWA backgrounding via pause/resume', () => {
   assert.match(pay, /resumePendingPay/);
   assert.doesNotMatch(shell, /['"]Load failed['"]/);
   assert.doesNotMatch(shell, /http:\/\/localhost:8402|127\.0\.0\.1:8402/);
+});
+
+test('Agent is hosted OCC + upload behind a subscription Bearer; chat keeps x402/MWA', () => {
+  const occ = fs.readFileSync(path.join(ROOT, 'www/app/occ.js'), 'utf8');
+  const sub = fs.readFileSync(path.join(ROOT, 'www/app/sub.js'), 'utf8');
+  assert.match(html, /id="modeSel"/);
+  assert.match(html, /<option value="agent">agent<\/option>/);
+  assert.match(html, /id="keyOverlay"/);
+  assert.match(html, /https:\/\/zoo\.openzoo\.fun\/subscriptions/);
+  assert.match(html, /https:\/\/zoo\.openzoo\.fun/);
+  const csp = (html.match(/Content-Security-Policy"\s+content="([^"]+)"/) || [])[1] || '';
+  assert.match(csp, /x402-tokens\.fly\.dev/);
+  assert.doesNotMatch(csp, /api\.anthropic\.com/);
+  assert.match(app, /sendAgent/);
+  assert.match(app, /No key → no Agent/);
+  assert.match(app, /OpenZooOcc\.setGoal|isGoalLine/);
+  assert.match(app, /OpenZooOcc\.uploadAll/);
+  assert.match(app, /OpenZooPay\.paidFetch/);
+  assert.match(pay, /Authorization': 'Bearer openzoo-psg1'/);
+  assert.match(pay, /MWA|signTransaction|\/v1\/pay\/build|X-PAYMENT/);
+  assert.match(occ, /\/v1\/occ\/sessions/);
+  assert.match(occ, /\/messages/);
+  assert.match(occ, /\/goal/);
+  assert.match(occ, /\/files/);
+  assert.match(occ, /Authorization/);
+  assert.match(occ, /Bearer/);
+  assert.doesNotMatch(occ, /ANTHROPIC_API_KEY\s*=/);
+  assert.doesNotMatch(occ, /node-pty|writeAgentPty/);
+  assert.doesNotMatch(app, /ANTHROPIC_API_KEY\s*=/);
+  assert.doesNotMatch(app, /node-pty|writeAgentPty/);
+  assert.doesNotMatch(sub, /ANTHROPIC_API_KEY\s*=/);
+  assert.match(readme, /\/v1\/occ\/sessions/);
+  assert.match(readme, /Authorization: Bearer/);
+  assert.match(readme, /x402/);
 });

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://api.mainnet-beta.solana.com; img-src 'self' data:; style-src 'self' 'unsafe-inline';">
-  <!-- connect-src: gateway (x402-tokens) + /supported (accrue) + the Solana RPC wrap/pay actually call. No :8402. -->
+    content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://api.mainnet-beta.solana.com https://zoo.openzoo.fun https://openzoo.fun; img-src 'self' data:; style-src 'self' 'unsafe-inline';">
+  <!-- connect-src: x402 door + /supported + Solana RPC + zoo.openzoo.fun (subscription key). Hosted OCC is the same door. No :8402. No api.anthropic.com. -->
   <title>openzoo</title>
   <link rel="stylesheet" href="app.css">
 </head>
@@ -47,6 +47,20 @@
     </div>
   </div>
 
+  <div id="keyOverlay" data-component="subscription-key-modal">
+    <div id="keyBox">
+      <h3>Agent key</h3>
+      <p class="wsub">Hosted OCC is gated on an OpenZoo subscription Bearer. No key → no Agent. Chat still pays per call via x402 / Jupiter Wallet. Never an Anthropic API key.</p>
+      <div id="keyStatus" class="wnote">No key stored.</div>
+      <textarea id="keyPaste" placeholder="paste key or billing success URL…" autocomplete="off" spellcheck="false"></textarea>
+      <div class="text-attach-actions">
+        <button class="dial" id="keyClear" type="button">remove key</button>
+        <a class="dial" id="keyPage" href="https://zoo.openzoo.fun/subscriptions" target="_blank" rel="noopener">get a key</a>
+        <button class="send-pill" id="keySave" type="button">save</button>
+      </div>
+    </div>
+  </div>
+
   <div id="textAttachOverlay" data-component="text-attach-modal">
     <div id="textAttachBox">
       <h3>Add notes</h3>
@@ -66,6 +80,11 @@
       </button>
       <div id="chatHeaderId"></div>
       <div id="headerDials">
+        <select class="dial" id="modeSel" data-component="run-mode" aria-label="Chat or Agent"
+                title="Chat pays x402 from Jupiter Wallet. Agent is hosted OCC + upload — needs a subscription Bearer.">
+          <option value="chat" selected>chat</option>
+          <option value="agent">agent</option>
+        </select>
         <select class="dial" id="tierSel" data-component="model-tier" aria-label="Model tier"
                 title="How much to spend per turn when racing">
           <option value="cheap">cheap</option>
@@ -90,6 +109,7 @@
         </select>
         <input id="model" list="modelList" class="dial model" placeholder="model" data-component="model-picker">
         <datalist id="modelList"></datalist>
+        <button class="dial" id="keyBtn" data-component="key-open" title="Agent subscription key">key</button>
         <button class="dial" id="walletBtn" data-component="wallet-open" title="Wallet">wallet</button>
         <button class="icon-btn" id="hudBtn" title="This session">◎</button>
         <button class="icon-btn" id="exit" title="Exit" data-testid="exit-button">✕</button>
@@ -103,6 +123,7 @@
       <div class="hfoot" id="hFoot">Connect Jupiter Wallet to pay from this handheld.</div>
     </div>
     <div id="statusChip" class="status-chip" hidden data-component="status-chip"></div>
+    <div id="goalTip" hidden>Pro tip: /goal &lt;job&gt; — hosted OCC keeps working until it's done.</div>
     <div id="log" data-component="chat-scroll"></div>
     <div id="bar">
       <div id="plusMenu">
@@ -142,6 +163,8 @@
   <script src="spill.js"></script>
   <script src="race.js"></script>
   <script src="copy.js"></script>
+  <script src="sub.js"></script>
+  <script src="occ.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
