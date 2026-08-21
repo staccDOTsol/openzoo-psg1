@@ -74,7 +74,7 @@ Door (one path set only): `https://zoo.openzoo.fun`
 | `POST` | `/ide/session` | `{ threadId, name }` → `{ url, password?, id }` |
 | `GET` | `/ide/session` | → `{ url, password?, id }` |
 
-A request without `Authorization: Bearer <key>` is 401 — no Agent. Never `ANTHROPIC_API_KEY`. Never an open URL. The `{ url, password? }` is loaded in the Agent webview (`#agentFrame`). `frame-src` allows only `https://zoo.openzoo.fun` and `https://*.openzoo.fun`.
+A request without `Authorization: Bearer <key>` is 401 — no Agent. Never `ANTHROPIC_API_KEY`. Never an open URL. The `{ url, password? }` is loaded in the Agent webview (`#agentFrame`). On the PSG1 handheld that webview is **full-bleed**: `viewport-fit=cover`, `#agentFrame` fills Agent mode, no desktop VS Code chrome letterbox. The Chat composer (`#bar`) is hidden in Agent mode. Chat still pays x402. `frame-src` allows only `https://zoo.openzoo.fun` and `https://*.openzoo.fun`.
 
 Chat (unchanged x402 lane):
 

@@ -176,3 +176,20 @@ test('Agent is cloud code-server + Cline via /ide/session Bearer; chat keeps x40
   assert.match(readme, /x402/);
   assert.match(readme, /subscription Bearer/);
 });
+
+test('Agent webview is full-bleed on the handheld; chat composer hidden', () => {
+  assert.match(html, /viewport-fit=cover/);
+  assert.match(shell, /viewport-fit=cover/);
+  assert.match(css, /body\.agent-mode #agentFrame/);
+  assert.match(css, /body\.agent-mode #agentFrame[\s\S]*inset:\s*0/);
+  assert.match(css, /body\.agent-mode #bar/);
+  assert.match(css, /display:\s*none\s*!important/);
+  assert.match(css, /100dvh/);
+  assert.match(css, /max-width:\s*1400px/);
+  assert.match(app, /setAgentSurface/);
+  assert.match(app, /\$\('bar'\)\.hidden/);
+  assert.match(html, /id="agentFrame"/);
+  assert.match(app, /OpenZooIde\.ensureSession/);
+  assert.match(app, /OpenZooPay\.paidFetch/);
+  assert.doesNotMatch(app, /OpenZooOcc/);
+});

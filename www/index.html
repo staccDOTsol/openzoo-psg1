@@ -322,7 +322,7 @@
     var iframe = document.createElement('iframe');
     iframe.id = 'game';
     iframe.allow = 'fullscreen';
-    iframe.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;border:none;z-index:9999;';
+    iframe.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;height:100dvh;border:none;z-index:9999;';
     document.body.appendChild(iframe);
 
     iframe.addEventListener('load', function onBootFallback() {

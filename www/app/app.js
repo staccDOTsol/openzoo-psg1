@@ -392,15 +392,24 @@ function syncSend() {
   $('send').classList.toggle('show', !!$('inp').value.trim() || pendingFiles.length > 0);
 }
 
+function setAgentSurface(agent) {
+  var entering = !!agent && !document.body.classList.contains('agent-mode');
+  document.body.classList.toggle('agent-mode', !!agent);
+  var pane = $('agentPane');
+  if (pane) pane.hidden = !agent;
+  if ($('bar')) $('bar').hidden = !!agent;
+  if ($('log')) $('log').hidden = !!agent;
+  if ($('plusMenu')) $('plusMenu').classList.remove('show');
+  if (entering) closeSidebar();
+}
+
 function closeAgentIde() {
   var frame = $('agentFrame');
-  var pane = $('agentPane');
   ideLoadedId = '';
   if (frame) {
     try { frame.removeAttribute('src'); } catch (_) {}
   }
-  if (pane) pane.hidden = true;
-  document.body.classList.remove('agent-mode');
+  setAgentSurface(false);
 }
 
 function loadAgentFrame(sess) {
@@ -414,10 +423,8 @@ function loadAgentFrame(sess) {
 
 function syncAgentPane() {
   var t = active();
-  var pane = $('agentPane');
   var agent = !!(t && t.mode === 'agent');
-  document.body.classList.toggle('agent-mode', agent);
-  if (pane) pane.hidden = !agent;
+  setAgentSurface(agent);
   if (agent && hasAgentKey() && !ideLoadedId && !ideBusy && !ideAttempted) {
     ideAttempted = true;
     openAgentIde().catch(function (e) {
@@ -442,9 +449,7 @@ async function openAgentIde() {
     t.ideSession = { id: sess.id };
     persist();
     loadAgentFrame(sess);
-    document.body.classList.add('agent-mode');
-    var pane = $('agentPane');
-    if (pane) pane.hidden = false;
+    setAgentSurface(true);
     setStatus('');
     return sess;
   } catch (e) {
@@ -921,8 +926,7 @@ $('modeSel').addEventListener('change', function () {
       setStatus((e && e.message) || 'Could not open Agent IDE.', 'warn');
     });
   } else {
-    document.body.classList.remove('agent-mode');
-    if ($('agentPane')) $('agentPane').hidden = true;
+    setAgentSurface(false);
   }
 });
 $('tierSel').addEventListener('change', function () {
