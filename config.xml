@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <widget id="fun.openzoo.psg1" version="1.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
     <name>OpenZoo</name>
-    <description>OpenZoo for Play Solana PSG1 — grokui threads, chat (x402/MWA), and Agent IDE (cloud code-server + Cline via /ide/session). The handheld talks directly to the gateway; no localhost proxy.</description>
+    <description>OpenZoo for Play Solana PSG1 — grokui threads, chat (x402/MWA), and Agent IDE (cloud code-server + Cline via /api/ide/session). The handheld talks directly to the gateway; no localhost proxy.</description>
     <author href="https://playsolana.com">
         OpenZoo
     </author>

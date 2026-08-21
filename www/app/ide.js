@@ -1,12 +1,12 @@
 /* Cloud code-server + Cline — Agent IDE.
    Origin: https://zoo.openzoo.fun
-   Auth: Authorization: Bearer <subscription key> on POST/GET /ide/session
+   Auth: Authorization: Bearer <subscription key> on POST/GET /api/ide/session
    Never ANTHROPIC_API_KEY. Never an open URL. Chat/x402 is a different lane. */
 'use strict';
 
 var OpenZooIde = (function (OpenZooSub) {
   var DOOR = 'https://zoo.openzoo.fun';
-  var ROUTE = '/ide/session';
+  var ROUTE = '/api/ide/session';
   var ALLOWED_HOSTS = {
     exact: {
       'zoo.openzoo.fun': true,

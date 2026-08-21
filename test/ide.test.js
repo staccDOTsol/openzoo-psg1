@@ -46,36 +46,36 @@ test('looksLikeSubscriptionKey rejects junk and Anthropic-shaped leftovers', () 
   assert.equal(OpenZooSub.looksLikeSubscriptionKey('ozk_live_abcd1234efgh'), true);
 });
 
-test('Agent IDE refuses every /ide/session call without a Bearer key', async () => {
+test('Agent IDE refuses every /api/ide/session call without a Bearer key', async () => {
   OpenZooSub.clearSubscription();
   await assert.rejects(() => OpenZooIde.getSession(), { name: 'NoSubscriptionError' });
   await assert.rejects(() => OpenZooIde.createSession({ threadId: 't1', name: 'n' }), { name: 'NoSubscriptionError' });
   await assert.rejects(() => OpenZooIde.ensureSession(null, { threadId: 't1' }), { name: 'NoSubscriptionError' });
 });
 
-test('IDE door is zoo.openzoo.fun /ide/session — no /occ, no /v1/ide', () => {
+test('IDE door is zoo.openzoo.fun /api/ide/session — no /occ, no /v1/ide', () => {
   const src = fs.readFileSync(path.join(__dirname, '../www/app/ide.js'), 'utf8');
   assert.match(src, /https:\/\/zoo\.openzoo\.fun/);
-  assert.match(src, /\/ide\/session/);
+  assert.match(src, /\/api\/ide\/session/);
+  assert.doesNotMatch(src, /['"]\/ide\/session['"]/);
   assert.doesNotMatch(src, /\/occ\//);
   assert.doesNotMatch(src, /\/v1\/ide/);
-  assert.doesNotMatch(src, /\/api\/ide/);
   assert.doesNotMatch(src, /x402-tokens\.fly\.dev/);
   assert.doesNotMatch(src, /ANTHROPIC_API_KEY\s*=/);
   assert.doesNotMatch(src, /https:\/\/api\.anthropic\.com/);
   assert.equal(OpenZooIde.DOOR, 'https://zoo.openzoo.fun');
-  assert.equal(OpenZooIde.ROUTE, '/ide/session');
-  assert.equal(OpenZooIde.doorUrl(), 'https://zoo.openzoo.fun/ide/session');
+  assert.equal(OpenZooIde.ROUTE, '/api/ide/session');
+  assert.equal(OpenZooIde.doorUrl(), 'https://zoo.openzoo.fun/api/ide/session');
 });
 
-test('POST/GET /ide/session return { url, password?, id }; 401 is no Agent', async () => {
+test('POST/GET /api/ide/session return { url, password?, id }; 401 is no Agent', async () => {
   OpenZooSub.saveSubscription({ key: 'ozk_live_testagentidekey99' });
   const hits = [];
   const prev = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     hits.push({ url: String(url), method: init.method, headers: init.headers, body: init.body });
     const u = String(url);
-    assert.equal(u, 'https://zoo.openzoo.fun/ide/session');
+    assert.equal(u, 'https://zoo.openzoo.fun/api/ide/session');
     if (init.method === 'GET') {
       return jsonRes(200, {
         id: 'ide-1',
@@ -179,6 +179,6 @@ test('x402 pay path is still the chat Authorization placeholder, not the Agent k
   assert.doesNotMatch(ide, /https:\/\/api\.anthropic\.com/);
   assert.match(app, /OpenZooPay\.paidFetch/);
   assert.match(app, /OpenZooIde\.ensureSession/);
-  assert.match(app, /\/ide\/session|openAgentIde|agentFrame/);
+  assert.match(app, /openAgentIde|agentFrame/);
   assert.doesNotMatch(app, /OpenZooOcc/);
 });

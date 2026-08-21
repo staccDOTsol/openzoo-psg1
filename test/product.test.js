@@ -131,7 +131,7 @@ test('shell persists 402 across MWA backgrounding via pause/resume', () => {
   assert.doesNotMatch(shell, /http:\/\/localhost:8402|127\.0\.0\.1:8402/);
 });
 
-test('Agent is cloud code-server + Cline via /ide/session Bearer; chat keeps x402/MWA', () => {
+test('Agent is cloud code-server + Cline via /api/ide/session Bearer; chat keeps x402/MWA', () => {
   const ide = fs.readFileSync(path.join(ROOT, 'www/app/ide.js'), 'utf8');
   const sub = fs.readFileSync(path.join(ROOT, 'www/app/sub.js'), 'utf8');
   assert.match(html, /id="modeSel"/);
@@ -157,7 +157,8 @@ test('Agent is cloud code-server + Cline via /ide/session Bearer; chat keeps x40
   assert.match(pay, /Authorization': 'Bearer openzoo-psg1'/);
   assert.match(pay, /MWA|signTransaction|\/v1\/pay\/build|X-PAYMENT/);
   assert.match(ide, /https:\/\/zoo\.openzoo\.fun/);
-  assert.match(ide, /\/ide\/session/);
+  assert.match(ide, /\/api\/ide\/session/);
+  assert.doesNotMatch(ide, /['"]\/ide\/session['"]/);
   assert.match(ide, /Authorization/);
   assert.match(ide, /Bearer/);
   assert.doesNotMatch(ide, /\/occ\//);
@@ -168,7 +169,7 @@ test('Agent is cloud code-server + Cline via /ide/session Bearer; chat keeps x40
   assert.doesNotMatch(app, /ANTHROPIC_API_KEY\s*=/);
   assert.doesNotMatch(app, /node-pty|writeAgentPty/);
   assert.doesNotMatch(sub, /ANTHROPIC_API_KEY\s*=/);
-  assert.match(readme, /\/ide\/session/);
+  assert.match(readme, /\/api\/ide\/session/);
   assert.match(readme, /code-server/);
   assert.match(readme, /Cline/);
   assert.doesNotMatch(readme, /\/occ\/sessions/);
