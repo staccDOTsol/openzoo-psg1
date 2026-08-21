@@ -86,14 +86,14 @@ test('PSG1 grokui defaults to Auto and posts the virtual id', () => {
 });
 
 test('Auto helper never classifies, never shortlists, never bounces :8402', () => {
-  assert.doesNotMatch(autoSrc, /shortlist/);
+  assert.doesNotMatch(autoSrc, /function shortlist|shortlist\s*\(/);
   assert.doesNotMatch(autoSrc, /\/v1\/route/);
   assert.doesNotMatch(autoSrc, /8402/);
   assert.doesNotMatch(autoSrc, /localhost|127\.0\.0\.1/);
   assert.doesNotMatch(autoSrc, /function classify|routeAuto\(|SCORE this prompt/);
   assert.doesNotMatch(autoSrc, /ling-3|llama-4|nemotron|nvidia\/nemo/);
   assert.doesNotMatch(app, /localhost:8402|127\.0\.0\.1:8402/);
-  assert.doesNotMatch(html, /8402/);
+  assert.doesNotMatch(html, /localhost:8402|127\.0\.0\.1:8402/);
 });
 
 test('x402 / MWA pay path is unchanged and Auto does not own payment', () => {

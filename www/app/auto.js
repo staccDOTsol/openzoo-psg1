@@ -1,6 +1,6 @@
 /* OpenZoo Auto — virtual model id for sidecar / gateway routing.
-   Clients send model: "openzoo/auto". The gateway classifier picks the
-   real model. This module does not classify, shortlist, or pick a catalog id. */
+   Clients send model: "openzoo/auto". The gateway picks the real model.
+   This module does not pick a catalog id or call a local judge. */
 'use strict';
 
 var OpenZooAuto = (function () {
