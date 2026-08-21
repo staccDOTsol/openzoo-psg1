@@ -16,10 +16,13 @@ function uid() {
 function hydrateThread(t) {
   if (!t || typeof t !== 'object') return t;
   t.tier = OpenZooRace.normalizeTier(t.tier);
+  t.mode = t.mode === 'agent' ? 'agent' : 'chat';
   if (t.race == null && t.raceNeed == null) {
     t.race = OpenZooRace.DEFAULT_N;
     t.raceNeed = OpenZooRace.DEFAULT_NEED;
   }
+  if (!t.occSession) t.occSession = null;
+  if (t.goalSet == null) t.goalSet = false;
   return t;
 }
 
@@ -33,6 +36,7 @@ var activeId = persisted.activeId && threads.some(function (t) { return t.id ===
 var wallet = { address: null, method: null };
 var pendingFiles = [];
 var busy = false;
+var agentCtl = null;
 var sidebarOpen = false;
 var catalogIds = [];
 var payQueue = OpenZooRace.createPayQueue();
@@ -53,6 +57,9 @@ function newThread(name) {
     calls: 0,
     model: '',
     tier: 'medium',
+    mode: 'chat',
+    occSession: null,
+    goalSet: false,
     race: OpenZooRace.DEFAULT_N,
     raceNeed: OpenZooRace.DEFAULT_NEED
   };
@@ -271,24 +278,38 @@ function racePlanOf(t) {
   return OpenZooRace.parseDial(OpenZooRace.formatDial(t.race, t.raceNeed));
 }
 
+function hasAgentKey() {
+  return !!(window.OpenZooSub && OpenZooSub.publicView().active);
+}
+
 function syncDials(t) {
   t = t || active();
   var tierSel = $('tierSel');
   var raceSel = $('raceSel');
+  var modeSel = $('modeSel');
   if (!tierSel || !raceSel) return;
   t.tier = OpenZooRace.normalizeTier(t.tier);
+  t.mode = t.mode === 'agent' ? 'agent' : 'chat';
   var plan = racePlanOf(t);
   t.race = plan.n;
   t.raceNeed = plan.need;
   tierSel.value = t.tier;
   raceSel.value = OpenZooRace.formatDial(plan);
-  var racing = plan.n >= 2;
+  if (modeSel) {
+    modeSel.value = t.mode;
+    modeSel.className = 'dial mode' + (t.mode === 'agent' ? ' hot' : '');
+  }
+  var racing = plan.n >= 2 && t.mode !== 'agent';
   tierSel.className = 'dial tier' + (racing && (t.tier === 'expensive' || t.tier === 'grok4.6') ? ' hot' : '');
   raceSel.className = 'dial race' + (racing ? ' hot' : '');
-  $('model').classList.toggle('pinned', racing);
-  $('model').title = racing
-    ? 'Racing the ' + t.tier + ' band — the single model picker is ignored until race is off.'
-    : 'Pin one model (race off)';
+  $('model').classList.toggle('pinned', racing || t.mode === 'agent');
+  $('model').title = t.mode === 'agent'
+    ? 'Agent is hosted OCC — the race/model pickers stay on chat.'
+    : racing
+      ? 'Racing the ' + t.tier + ' band — the single model picker is ignored until race is off.'
+      : 'Pin one model (race off)';
+  var tip = $('goalTip');
+  if (tip) tip.hidden = t.mode !== 'agent' || t.goalSet;
 }
 
 function sessionTotals() {
@@ -335,7 +356,7 @@ function renderLog() {
   if (!t.messages.length) {
     var w = document.createElement('div');
     w.className = 'welcome';
-    w.textContent = 'openzoo on Play Solana. Start a thread, attach files or notes if you want the zoo to remember them, and message. Payment comes from Jupiter Wallet — the app tops up in the background when it can.';
+    w.textContent = 'openzoo on Play Solana. Chat pays from Jupiter Wallet (x402). Agent is hosted OCC + upload — paste a subscription Bearer first. No key, no Agent.';
     log.appendChild(w);
     return;
   }
@@ -370,6 +391,14 @@ function render() {
 
 function syncSend() {
   $('send').classList.toggle('show', !!$('inp').value.trim() || pendingFiles.length > 0);
+  syncStop();
+}
+
+function syncStop() {
+  var btn = $('agentStop');
+  if (!btn) return;
+  var t = active();
+  btn.hidden = !(busy && t && t.mode === 'agent');
 }
 
 function maxTokens(model) {
@@ -427,6 +456,15 @@ function readFileAsText(file) {
   });
 }
 
+function readFileAsBytes(file) {
+  return new Promise(function (resolve) {
+    var r = new FileReader();
+    r.onload = function () { resolve(r.result); };
+    r.onerror = function () { resolve(null); };
+    r.readAsArrayBuffer(file);
+  });
+}
+
 async function ingestFiles(fileList) {
   var files = Array.from(fileList || []);
   var i;
@@ -434,7 +472,8 @@ async function ingestFiles(fileList) {
     var f = files[i];
     var name = f.webkitRelativePath || f.name;
     var content = (looksText(f) && f.size < 400000) ? await readFileAsText(f) : null;
-    pendingFiles.push({ name: name, size: f.size, content: content });
+    var bytes = f.size < 4 * 1024 * 1024 ? await readFileAsBytes(f) : null;
+    pendingFiles.push({ name: name, size: f.size, content: content, bytes: bytes });
   }
   renderAttachChips();
   syncSend();
@@ -553,14 +592,103 @@ async function racePairwise(t, messages, tied, billedBits) {
   return OpenZooRace.pickTiedLetter(verdict, tied);
 }
 
+function refreshKeyStatus() {
+  var el = $('keyStatus');
+  if (!el || !window.OpenZooSub) return;
+  var view = OpenZooSub.publicView();
+  el.textContent = view.active
+    ? ('Key stored · ' + view.masked + (view.tierName ? (' · ' + view.tierName) : ''))
+    : 'No key stored. Agent stays closed.';
+}
+
+function openKeyOverlay() {
+  refreshKeyStatus();
+  $('keyOverlay').classList.add('show');
+  $('keyPaste').focus();
+}
+
+function closeKeyOverlay() {
+  $('keyOverlay').classList.remove('show');
+}
+
+async function sendAgent(t, text, attached) {
+  if (!window.OpenZooOcc || !window.OpenZooSub) throw new Error('hosted OCC client missing');
+  if (!hasAgentKey()) {
+    openKeyOverlay();
+    throw Object.assign(new Error('Paste an OpenZoo subscription key to use Agent.'), { name: 'NoSubscriptionError' });
+  }
+  setStatus('Opening hosted OCC…');
+  var sess = await OpenZooOcc.ensureSession(t.occSession, { threadId: t.id, name: t.name });
+  t.occSession = { id: sess.id };
+  persist();
+  if (attached && attached.length) {
+    setStatus('Uploading…');
+    var wrote = await OpenZooOcc.uploadAll(sess.id, attached.map(function (f) {
+      return { name: f.name, path: f.name, content: f.content, bytes: f.bytes };
+    }));
+    t.attached = (t.attached || 0) + wrote.length;
+    persist();
+    renderHeader();
+    if (!text) {
+      text = 'Look at what I uploaded: ' + attached.map(function (f) { return f.name; }).join(', ');
+    }
+  }
+  var painted = '';
+  var onDelta = function (full) {
+    painted = String(full || '');
+    var row = $('log').querySelector('.row.bot.pending .bubble');
+    if (row) row.textContent = painted || '…';
+  };
+  if (OpenZooOcc.isGoalLine(text)) t.goalSet = true;
+  setStatus('Agent working…');
+  agentCtl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  syncStop();
+  var got;
+  try {
+    // /goal is just a message string — no separate HTTP path.
+    got = await OpenZooOcc.sendMessage(sess.id, text, onDelta, agentCtl && agentCtl.signal);
+  } catch (e) {
+    if (e && (e.name === 'AbortError' || /aborted/i.test(e.message || ''))) {
+      return painted || 'interrupted.';
+    }
+    throw e;
+  } finally {
+    agentCtl = null;
+    syncStop();
+  }
+  persist();
+  return (got && got.text) || painted || '';
+}
+
+async function stopAgent() {
+  var t = active();
+  var id = t && t.occSession && t.occSession.id;
+  if (agentCtl) {
+    try { agentCtl.abort(); } catch (_) { /* ignore */ }
+  }
+  if (!id || !window.OpenZooOcc) return;
+  try {
+    await OpenZooOcc.stop(id);
+    setStatus('Agent interrupted.');
+  } catch (e) {
+    setStatus((e && e.message) || String(e), 'warn');
+  }
+}
+
 async function send() {
   var text = $('inp').value.trim();
   if ((!text && !pendingFiles.length) || busy) return;
-  if (!wallet.address) {
+  var t = active();
+  t.mode = ($('modeSel') && $('modeSel').value === 'agent') ? 'agent' : (t.mode === 'agent' ? 'agent' : 'chat');
+  if (t.mode === 'agent' && !hasAgentKey()) {
+    setStatus('No key → no Agent. Paste a subscription Bearer.', 'warn');
+    openKeyOverlay();
+    return;
+  }
+  if (t.mode !== 'agent' && !wallet.address) {
     setStatus('Connect Jupiter Wallet to pay.', 'warn');
     return;
   }
-  var t = active();
   t.model = $('model').value || t.model;
   t.tier = OpenZooRace.normalizeTier($('tierSel').value);
   var dial = OpenZooRace.parseDial($('raceSel').value);
@@ -569,16 +697,20 @@ async function send() {
   busy = true;
   $('inp').value = '';
   syncSend();
+  syncStop();
 
   var attached = pendingFiles.slice();
   var attachCorpus = corpusFromPending();
   pendingFiles = [];
   renderAttachChips();
 
-  if (attachCorpus) {
+  if (t.mode !== 'agent' && attachCorpus) {
     var names = attached.map(function (f) { return f.name; }).join(', ');
     if (!text) text = 'Look at what I attached: ' + names;
     await remember(attachCorpus, 'Attaching…');
+  }
+  if (t.mode === 'agent' && attached.length && !text) {
+    text = 'Look at what I uploaded: ' + attached.map(function (f) { return f.name; }).join(', ');
   }
 
   t.messages.push({ role: 'user', content: text });
@@ -590,12 +722,15 @@ async function send() {
   var thinking = bubble('…', false, true);
 
   try {
-    await rememberHistory(t);
-    var plan = OpenZooSpill.outgoingChat(t.messages, t.memory);
-    var racePlan = racePlanOf(t);
     var content;
     var billedBits = [];
-    if (racePlan.n >= 2) {
+    if (t.mode === 'agent') {
+      content = await sendAgent(t, text, attached);
+    } else {
+      await rememberHistory(t);
+      var plan = OpenZooSpill.outgoingChat(t.messages, t.memory);
+      var racePlan = racePlanOf(t);
+      if (racePlan.n >= 2) {
       setStatus(OpenZooRace.formatRaceStatus(0, racePlan.need));
       var painted = '';
       content = await OpenZooRace.brainRace(
@@ -650,7 +785,8 @@ async function send() {
       if (typeof x.billedUsd === 'number') billedBits.push('$' + x.billedUsd.toFixed(4));
       if (x.lecore && x.lecore.engaged) billedBits.push((x.lecore.recalled != null ? x.lecore.recalled : '?') + ' slices');
     }
-    if (!content) throw new Error(OpenZooRace.RACE_EVERY_FAILED);
+    }
+    if (!content) throw new Error(t.mode === 'agent' ? 'Hosted OCC returned nothing.' : OpenZooRace.RACE_EVERY_FAILED);
     thinking.textContent = content;
     thinking.parentElement.classList.remove('pending');
     t.messages.push({ role: 'assistant', content: content });
@@ -663,16 +799,20 @@ async function send() {
     persist();
     renderHud();
     setStatus('');
-    rememberHistory(t);
+    if (t.mode !== 'agent') rememberHistory(t);
+    else syncDials(t);
   } catch (e) {
-    var shown = OpenZooPay.humanizePayError(e);
+    var shown = (e && e.name === 'NoSubscriptionError')
+      ? (e.message || 'No key → no Agent.')
+      : OpenZooPay.humanizePayError(e);
     thinking.textContent = shown;
     thinking.parentElement.classList.remove('pending');
-    if (!e || e.name !== 'NeedFundsError') t.messages.pop();
+    if (!e || (e.name !== 'NeedFundsError' && e.name !== 'NoSubscriptionError')) t.messages.pop();
     persist();
     setStatus(shown, 'warn');
   }
   busy = false;
+  syncStop();
 }
 
 function fmtAmt(raw, decimals) {
@@ -764,6 +904,7 @@ window.addEventListener('message', function (event) {
 window.parent.postMessage({ type: 'wallet-request-info' }, '*');
 
 $('send').onclick = send;
+if ($('agentStop')) $('agentStop').onclick = stopAgent;
 $('inp').addEventListener('input', syncSend);
 $('inp').addEventListener('keydown', function (e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -771,6 +912,22 @@ $('inp').addEventListener('keydown', function (e) {
 $('model').addEventListener('change', function () {
   active().model = $('model').value;
   persist();
+});
+$('modeSel').addEventListener('change', function () {
+  var t = active();
+  var next = $('modeSel').value === 'agent' ? 'agent' : 'chat';
+  if (next === 'agent' && !hasAgentKey()) {
+    $('modeSel').value = 'chat';
+    t.mode = 'chat';
+    persist();
+    syncDials(t);
+    setStatus('No key → no Agent. Paste a subscription Bearer.', 'warn');
+    openKeyOverlay();
+    return;
+  }
+  t.mode = next;
+  persist();
+  syncDials(t);
 });
 $('tierSel').addEventListener('change', function () {
   var t = active();
@@ -800,6 +957,40 @@ $('menuBtn').onclick = function () {
   if (sidebarOpen) closeSidebar();
   else openSidebar();
 };
+$('keyBtn').onclick = openKeyOverlay;
+$('keySave').onclick = async function () {
+  if (!window.OpenZooSub) return;
+  var pasted = $('keyPaste').value;
+  var result = await OpenZooSub.ingestPaste(pasted).catch(function (e) {
+    return { ok: false, error: e.message || 'could not save key' };
+  });
+  if (!result.ok) {
+    setStatus(result.error === 'empty' ? 'Paste a key first.' : result.error, 'warn');
+    refreshKeyStatus();
+    return;
+  }
+  if (result.pending) {
+    setStatus('Waiting on billing…', 'warn');
+    refreshKeyStatus();
+    return;
+  }
+  $('keyPaste').value = '';
+  refreshKeyStatus();
+  setStatus('Agent key saved.', 'ok');
+  closeKeyOverlay();
+};
+$('keyClear').onclick = function () {
+  if (window.OpenZooSub) OpenZooSub.clearSubscription();
+  var t = active();
+  if (t.mode === 'agent') t.mode = 'chat';
+  persist();
+  refreshKeyStatus();
+  syncDials(t);
+  setStatus('Key removed. Agent closed.', 'warn');
+};
+$('keyOverlay').addEventListener('click', function (e) {
+  if (e.target === $('keyOverlay')) closeKeyOverlay();
+});
 $('walletBtn').onclick = openWallet;
 $('walletClose').onclick = function () { $('walletOverlay').classList.remove('show'); };
 $('walletOverlay').addEventListener('click', function (e) {

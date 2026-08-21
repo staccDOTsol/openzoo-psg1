@@ -4,7 +4,7 @@ OpenZoo on the [Play Solana](https://playsolana.com) Gen1 handheld: the **grokui
 
 Widget / package id: **`fun.openzoo.psg1`**.
 
-The phone talks to `https://x402-tokens.fly.dev` directly. CORS is live. There is no local proxy hop. `connect-src` allows that gateway, `https://x402.accrue.fund` (live `/supported`), and `https://api.mainnet-beta.solana.com` (the RPC wrap/balances actually call).
+The phone talks to `https://x402-tokens.fly.dev` directly for **chat / x402**. CORS is live. There is no local proxy hop. `connect-src` allows that gateway, `https://x402.accrue.fund` (live `/supported`), `https://api.mainnet-beta.solana.com` (the RPC wrap/balances actually call), and `https://zoo.openzoo.fun` (hosted OCC + subscription key ingest). Never `api.anthropic.com`. Never `ANTHROPIC_API_KEY`. Never an open OCC URL.
 
 Wallet addresses are selectable. Tap an address (or select text) to copy it; a **copied** toast confirms. Copy uses the Android clipboard via the Cordova MWA plugin — `navigator.clipboard` is not a secure-context API in this WebView. This handheld pays from Jupiter Wallet, not a local burner.
 
@@ -15,7 +15,7 @@ A 402 is written to `sessionStorage` before Jupiter opens. When MWA backgrounds 
 | Surface | Role |
 |---|---|
 | `www/index.html` | Wallet shell. Owns MWA. Never app logic. |
-| `www/app/` | grokui-on-a-phone: thread sidebar, chat canvas, wallet overlay |
+| `www/app/` | grokui-on-a-phone: threads, **chat** (x402), **Agent** (hosted OCC + upload) |
 | `cordova-plugin-mwa` | Native MWA: `authorize`, `signMessage`, `signTransaction` (402), `signAndSendTransaction` (wrap only) |
 
 ```
@@ -24,9 +24,9 @@ A 402 is written to `sessionStorage` before Jupiter opens. When MWA backgrounds 
 │  • MWA connect — Jupiter Wallet on PSG1    │
 │  ┌──────────────────────────────────────┐  │
 │  │ iframe: www/app/                     │  │
-│  │  threads / chat / wallet             │  │
-│  │  attach files quietly                │  │
-│  │  POST https://x402-tokens.fly.dev    │  │
+│  │  threads / chat / Agent              │  │
+│  │  chat: x402 + MWA                    │  │
+│  │  Agent: hosted OCC + upload (Bearer) │  │
 │  └──────────────────────────────────────┘  │
 └────────────────────────────────────────────┘
 ```
@@ -59,7 +59,41 @@ The wallet address is tap-to-copy. Errors stay human — never a raw "Load faile
 
 The UI never shows context ids, bind routes, bind hashes, or wrap-twin homework. Wallet copy talks about USDC / TOKEN / LEOS.
 
-Desktop RUN / WRITE / READ / SERVE are not on this handheld.
+Desktop RUN / WRITE / READ / SERVE are not on this handheld. Agent is **not** an open PTY — it is hosted OCC over HTTP.
+
+## Agent (hosted OCC)
+
+Chat stays the x402 / Jupiter Wallet pay path. Do not strip it.
+
+**Agent = hosted OCC + file upload**, gated on `Authorization: Bearer <subscription key>` on every OCC/upload call. No key → no Agent. The key is pasted from [zoo.openzoo.fun/subscriptions](https://zoo.openzoo.fun/subscriptions) (or the billing success URL). It is never an Anthropic API key. Chat still uses the x402/MWA wallet lane; Agent uses the subscription Bearer, not a wallet token.
+
+Door (same as iOS/Android — one path set only): `https://zoo.openzoo.fun`
+
+| Method | Path | Body |
+|---|---|---|
+| `POST` | `/occ/sessions` | `{ threadId, name }` → `{ id }` / `{ session_id }` |
+| `POST` | `/occ/sessions/:id/messages` | `{ text, message, stream: true }` — SSE. `/goal` is just a message string. |
+| `POST` | `/occ/sessions/:id/files` | multipart `file` or JSON `{ name, content, encoding: "base64" }` |
+| `POST` | `/occ/sessions/:id/stop` | interrupt |
+
+SSE: `{ type: delta\|text\|output\|status\|pty\|done\|error }` and OpenAI-style `{ choices: [{ delta: { content } }] }`. A request without `Authorization: Bearer <key>` is 401 — no Agent. Never `ANTHROPIC_API_KEY`. Never an open OCC URL.
+
+Chat (unchanged x402 lane):
+
+| Method | Route | Auth |
+|---|---|---|
+| `POST` | `/v1/chat/completions` | any `Authorization` + `X-PAYMENT` after 402 |
+| `POST` | `/v1/hrr/bind` | same x402 loop (silent attach) |
+| `POST` | `/v1/pay/build` | none — unsigned tx for MWA |
+| `GET` | `/v1/models` | same x402 loop if quoted |
+
+Key ingest (not OCC):
+
+| Method | Route |
+|---|---|
+| `GET` | `https://zoo.openzoo.fun/api/billing/tiers` |
+| `GET` | `https://zoo.openzoo.fun/api/billing/key?session=` |
+| page | `https://zoo.openzoo.fun/subscriptions` |
 
 ## Build the Android APK
 

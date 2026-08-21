@@ -158,7 +158,8 @@ test('CSP connect-src lists every gateway and RPC the client actually calls', ()
   const needed = [
     'https://x402-tokens.fly.dev',
     'https://x402.accrue.fund',
-    'https://api.mainnet-beta.solana.com'
+    'https://api.mainnet-beta.solana.com',
+    'https://zoo.openzoo.fun'
   ];
   for (const host of needed) {
     assert.match(appCsp, new RegExp(host.replace(/\./g, '\\.')));
