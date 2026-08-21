@@ -21,8 +21,7 @@ function hydrateThread(t) {
     t.race = OpenZooRace.DEFAULT_N;
     t.raceNeed = OpenZooRace.DEFAULT_NEED;
   }
-  if (!t.occSession) t.occSession = null;
-  if (t.goalSet == null) t.goalSet = false;
+  if (!t.ideSession) t.ideSession = null;
   return t;
 }
 
@@ -36,7 +35,9 @@ var activeId = persisted.activeId && threads.some(function (t) { return t.id ===
 var wallet = { address: null, method: null };
 var pendingFiles = [];
 var busy = false;
-var agentCtl = null;
+var ideBusy = false;
+var ideLoadedId = '';
+var ideAttempted = false;
 var sidebarOpen = false;
 var catalogIds = [];
 var payQueue = OpenZooRace.createPayQueue();
@@ -58,8 +59,7 @@ function newThread(name) {
     model: '',
     tier: 'medium',
     mode: 'chat',
-    occSession: null,
-    goalSet: false,
+    ideSession: null,
     race: OpenZooRace.DEFAULT_N,
     raceNeed: OpenZooRace.DEFAULT_NEED
   };
@@ -304,12 +304,10 @@ function syncDials(t) {
   raceSel.className = 'dial race' + (racing ? ' hot' : '');
   $('model').classList.toggle('pinned', racing || t.mode === 'agent');
   $('model').title = t.mode === 'agent'
-    ? 'Agent is hosted OCC — the race/model pickers stay on chat.'
+    ? 'Agent is cloud code-server + Cline — the race/model pickers stay on chat.'
     : racing
       ? 'Racing the ' + t.tier + ' band — the single model picker is ignored until race is off.'
       : 'Pin one model (race off)';
-  var tip = $('goalTip');
-  if (tip) tip.hidden = t.mode !== 'agent' || t.goalSet;
 }
 
 function sessionTotals() {
@@ -356,7 +354,7 @@ function renderLog() {
   if (!t.messages.length) {
     var w = document.createElement('div');
     w.className = 'welcome';
-    w.textContent = 'openzoo on Play Solana. Chat pays from Jupiter Wallet (x402). Agent is hosted OCC + upload — paste a subscription Bearer first. No key, no Agent.';
+    w.textContent = 'openzoo on Play Solana. Chat pays from Jupiter Wallet (x402). Agent is cloud code-server + Cline — paste a subscription Bearer first. No key, no Agent.';
     log.appendChild(w);
     return;
   }
@@ -387,18 +385,74 @@ function render() {
   renderHud();
   renderAttachChips();
   syncSend();
+  syncAgentPane();
 }
 
 function syncSend() {
   $('send').classList.toggle('show', !!$('inp').value.trim() || pendingFiles.length > 0);
-  syncStop();
 }
 
-function syncStop() {
-  var btn = $('agentStop');
-  if (!btn) return;
+function closeAgentIde() {
+  var frame = $('agentFrame');
+  var pane = $('agentPane');
+  ideLoadedId = '';
+  if (frame) {
+    try { frame.removeAttribute('src'); } catch (_) {}
+  }
+  if (pane) pane.hidden = true;
+  document.body.classList.remove('agent-mode');
+}
+
+function loadAgentFrame(sess) {
+  var frame = $('agentFrame');
+  if (!frame || !window.OpenZooIde) return;
+  var src = OpenZooIde.embedSrc(sess);
+  if (frame.getAttribute('src') === src && ideLoadedId && sess && sess.id === ideLoadedId) return;
+  frame.setAttribute('src', src);
+  ideLoadedId = (sess && sess.id) || src;
+}
+
+function syncAgentPane() {
   var t = active();
-  btn.hidden = !(busy && t && t.mode === 'agent');
+  var pane = $('agentPane');
+  var agent = !!(t && t.mode === 'agent');
+  document.body.classList.toggle('agent-mode', agent);
+  if (pane) pane.hidden = !agent;
+  if (agent && hasAgentKey() && !ideLoadedId && !ideBusy && !ideAttempted) {
+    ideAttempted = true;
+    openAgentIde().catch(function (e) {
+      setStatus((e && e.message) || 'Could not open Agent IDE.', 'warn');
+    });
+  }
+}
+
+async function openAgentIde() {
+  if (!window.OpenZooIde || !window.OpenZooSub) throw new Error('Agent IDE client missing');
+  if (!hasAgentKey()) {
+    openKeyOverlay();
+    throw Object.assign(new Error('Paste an OpenZoo subscription key to use Agent.'), { name: 'NoSubscriptionError' });
+  }
+  if (ideBusy) return;
+  ideAttempted = true;
+  var t = active();
+  ideBusy = true;
+  setStatus('Opening Agent IDE…');
+  try {
+    var sess = await OpenZooIde.ensureSession(t.ideSession, { threadId: t.id, name: t.name });
+    t.ideSession = { id: sess.id };
+    persist();
+    loadAgentFrame(sess);
+    document.body.classList.add('agent-mode');
+    var pane = $('agentPane');
+    if (pane) pane.hidden = false;
+    setStatus('');
+    return sess;
+  } catch (e) {
+    closeAgentIde();
+    throw e;
+  } finally {
+    ideBusy = false;
+  }
 }
 
 function maxTokens(model) {
@@ -611,81 +665,28 @@ function closeKeyOverlay() {
   $('keyOverlay').classList.remove('show');
 }
 
-async function sendAgent(t, text, attached) {
-  if (!window.OpenZooOcc || !window.OpenZooSub) throw new Error('hosted OCC client missing');
-  if (!hasAgentKey()) {
-    openKeyOverlay();
-    throw Object.assign(new Error('Paste an OpenZoo subscription key to use Agent.'), { name: 'NoSubscriptionError' });
-  }
-  setStatus('Opening hosted OCC…');
-  var sess = await OpenZooOcc.ensureSession(t.occSession, { threadId: t.id, name: t.name });
-  t.occSession = { id: sess.id };
-  persist();
-  if (attached && attached.length) {
-    setStatus('Uploading…');
-    var wrote = await OpenZooOcc.uploadAll(sess.id, attached.map(function (f) {
-      return { name: f.name, path: f.name, content: f.content, bytes: f.bytes };
-    }));
-    t.attached = (t.attached || 0) + wrote.length;
-    persist();
-    renderHeader();
-    if (!text) {
-      text = 'Look at what I uploaded: ' + attached.map(function (f) { return f.name; }).join(', ');
-    }
-  }
-  var painted = '';
-  var onDelta = function (full) {
-    painted = String(full || '');
-    var row = $('log').querySelector('.row.bot.pending .bubble');
-    if (row) row.textContent = painted || '…';
-  };
-  if (OpenZooOcc.isGoalLine(text)) t.goalSet = true;
-  setStatus('Agent working…');
-  agentCtl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  syncStop();
-  var got;
-  try {
-    // /goal is just a message string — no separate HTTP path.
-    got = await OpenZooOcc.sendMessage(sess.id, text, onDelta, agentCtl && agentCtl.signal);
-  } catch (e) {
-    if (e && (e.name === 'AbortError' || /aborted/i.test(e.message || ''))) {
-      return painted || 'interrupted.';
-    }
-    throw e;
-  } finally {
-    agentCtl = null;
-    syncStop();
-  }
-  persist();
-  return (got && got.text) || painted || '';
-}
-
-async function stopAgent() {
-  var t = active();
-  var id = t && t.occSession && t.occSession.id;
-  if (agentCtl) {
-    try { agentCtl.abort(); } catch (_) { /* ignore */ }
-  }
-  if (!id || !window.OpenZooOcc) return;
-  try {
-    await OpenZooOcc.stop(id);
-    setStatus('Agent interrupted.');
-  } catch (e) {
-    setStatus((e && e.message) || String(e), 'warn');
-  }
-}
-
 async function send() {
   var text = $('inp').value.trim();
   if ((!text && !pendingFiles.length) || busy) return;
   var t = active();
   t.mode = ($('modeSel') && $('modeSel').value === 'agent') ? 'agent' : (t.mode === 'agent' ? 'agent' : 'chat');
-  if (t.mode === 'agent' && !hasAgentKey()) {
-    setStatus('No key → no Agent. Paste a subscription Bearer.', 'warn');
-    openKeyOverlay();
+  if (t.mode === 'agent') {
+    if (!hasAgentKey()) {
+      setStatus('No key → no Agent. Paste a subscription Bearer.', 'warn');
+      openKeyOverlay();
+      return;
+    }
+    try {
+      await openAgentIde();
+    } catch (e) {
+      var shownIde = (e && e.name === 'NoSubscriptionError')
+        ? (e.message || 'No key → no Agent.')
+        : ((e && e.message) || String(e));
+      setStatus(shownIde, 'warn');
+    }
     return;
   }
-  if (t.mode !== 'agent' && !wallet.address) {
+  if (!wallet.address) {
     setStatus('Connect Jupiter Wallet to pay.', 'warn');
     return;
   }
@@ -697,22 +698,17 @@ async function send() {
   busy = true;
   $('inp').value = '';
   syncSend();
-  syncStop();
 
   var attached = pendingFiles.slice();
   var attachCorpus = corpusFromPending();
   pendingFiles = [];
   renderAttachChips();
 
-  if (t.mode !== 'agent' && attachCorpus) {
+  if (attachCorpus) {
     var names = attached.map(function (f) { return f.name; }).join(', ');
     if (!text) text = 'Look at what I attached: ' + names;
     await remember(attachCorpus, 'Attaching…');
   }
-  if (t.mode === 'agent' && attached.length && !text) {
-    text = 'Look at what I uploaded: ' + attached.map(function (f) { return f.name; }).join(', ');
-  }
-
   t.messages.push({ role: 'user', content: text });
   t.lastActivityAt = Date.now();
   if (t.name === 'openzoo' || t.name === 'new') t.name = text.slice(0, 28);
@@ -724,13 +720,10 @@ async function send() {
   try {
     var content;
     var billedBits = [];
-    if (t.mode === 'agent') {
-      content = await sendAgent(t, text, attached);
-    } else {
-      await rememberHistory(t);
-      var plan = OpenZooSpill.outgoingChat(t.messages, t.memory);
-      var racePlan = racePlanOf(t);
-      if (racePlan.n >= 2) {
+    await rememberHistory(t);
+    var plan = OpenZooSpill.outgoingChat(t.messages, t.memory);
+    var racePlan = racePlanOf(t);
+    if (racePlan.n >= 2) {
       setStatus(OpenZooRace.formatRaceStatus(0, racePlan.need));
       var painted = '';
       content = await OpenZooRace.brainRace(
@@ -785,8 +778,7 @@ async function send() {
       if (typeof x.billedUsd === 'number') billedBits.push('$' + x.billedUsd.toFixed(4));
       if (x.lecore && x.lecore.engaged) billedBits.push((x.lecore.recalled != null ? x.lecore.recalled : '?') + ' slices');
     }
-    }
-    if (!content) throw new Error(t.mode === 'agent' ? 'Hosted OCC returned nothing.' : OpenZooRace.RACE_EVERY_FAILED);
+    if (!content) throw new Error(OpenZooRace.RACE_EVERY_FAILED);
     thinking.textContent = content;
     thinking.parentElement.classList.remove('pending');
     t.messages.push({ role: 'assistant', content: content });
@@ -799,20 +791,16 @@ async function send() {
     persist();
     renderHud();
     setStatus('');
-    if (t.mode !== 'agent') rememberHistory(t);
-    else syncDials(t);
+    rememberHistory(t);
   } catch (e) {
-    var shown = (e && e.name === 'NoSubscriptionError')
-      ? (e.message || 'No key → no Agent.')
-      : OpenZooPay.humanizePayError(e);
+    var shown = OpenZooPay.humanizePayError(e);
     thinking.textContent = shown;
     thinking.parentElement.classList.remove('pending');
-    if (!e || (e.name !== 'NeedFundsError' && e.name !== 'NoSubscriptionError')) t.messages.pop();
+    if (!e || e.name !== 'NeedFundsError') t.messages.pop();
     persist();
     setStatus(shown, 'warn');
   }
   busy = false;
-  syncStop();
 }
 
 function fmtAmt(raw, decimals) {
@@ -904,7 +892,6 @@ window.addEventListener('message', function (event) {
 window.parent.postMessage({ type: 'wallet-request-info' }, '*');
 
 $('send').onclick = send;
-if ($('agentStop')) $('agentStop').onclick = stopAgent;
 $('inp').addEventListener('input', syncSend);
 $('inp').addEventListener('keydown', function (e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -928,6 +915,15 @@ $('modeSel').addEventListener('change', function () {
   t.mode = next;
   persist();
   syncDials(t);
+  if (next === 'agent') {
+    ideAttempted = false;
+    openAgentIde().catch(function (e) {
+      setStatus((e && e.message) || 'Could not open Agent IDE.', 'warn');
+    });
+  } else {
+    document.body.classList.remove('agent-mode');
+    if ($('agentPane')) $('agentPane').hidden = true;
+  }
 });
 $('tierSel').addEventListener('change', function () {
   var t = active();
@@ -978,12 +974,21 @@ $('keySave').onclick = async function () {
   refreshKeyStatus();
   setStatus('Agent key saved.', 'ok');
   closeKeyOverlay();
+  if (active().mode === 'agent') {
+    ideAttempted = false;
+    openAgentIde().catch(function (e) {
+      setStatus((e && e.message) || 'Could not open Agent IDE.', 'warn');
+    });
+  }
 };
 $('keyClear').onclick = function () {
   if (window.OpenZooSub) OpenZooSub.clearSubscription();
   var t = active();
   if (t.mode === 'agent') t.mode = 'chat';
+  t.ideSession = null;
   persist();
+  ideAttempted = false;
+  closeAgentIde();
   refreshKeyStatus();
   syncDials(t);
   setStatus('Key removed. Agent closed.', 'warn');

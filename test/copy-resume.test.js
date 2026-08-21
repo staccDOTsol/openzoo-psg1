@@ -175,6 +175,9 @@ test('CSP connect-src lists every gateway and RPC the client actually calls', ()
   }
   assert.doesNotMatch(appCsp, /8402/);
   assert.doesNotMatch(shellCsp, /8402/);
+  assert.match(appCsp, /frame-src[^"]*https:\/\/zoo\.openzoo\.fun/);
+  assert.match(appCsp, /frame-src[^"]*https:\/\/\*\.openzoo\.fun/);
+  assert.match(shellCsp, /frame-src[^"]*https:\/\/\*\.openzoo\.fun/);
 });
 
 test('still Cordova + MWA, no :8402 bounce, no iOS deeplink pay path', () => {
